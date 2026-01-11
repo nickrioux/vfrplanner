@@ -25,7 +25,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAltitude: 3000,
     showLabels: false,
     allowDrag: true,
-    enableLogging: false,
+    enableLogging: true,
     distanceUnit: 'nm',
     altitudeUnit: 'ft',
     speedUnit: 'kt',
