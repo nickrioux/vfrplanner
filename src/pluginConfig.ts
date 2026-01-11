@@ -1,17 +1,20 @@
 import type { ExternalPluginConfig } from '@windy/interfaces';
 
 const config: ExternalPluginConfig = {
-    name: 'windy-plugin-my-plugin',
+    name: 'windy-plugin-vfr-planner',
     version: '0.1.0',
-    icon: '🔌',
-    title: 'This is my first plugin',
-    description: 'This is my first plugin.',
-    author: 'John Doe (optional company name)',
-    repository: 'https://github.com/windycom/windy-plugin-template',
+    icon: '✈️',
+    title: 'VFR Flight Planner',
+    description: 'VFR flight planning with ForeFlight import support',
+    author: 'Nicolas',
+    repository: 'https://github.com/nrioux/windy-plugin-vfr-planner',
     desktopUI: 'rhpane',
     mobileUI: 'fullscreen',
-    routerPath: '/my-plugin',
+    desktopWidth: 400,
+    routerPath: '/vfr-planner',
     private: true,
+    addToContextmenu: true,
+    listenToSingleclick: true,
 };
 
 export default config;

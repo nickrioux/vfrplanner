@@ -19,8 +19,8 @@ export interface WaypointWeather {
     temperature: number;    // celsius
     dewPoint?: number;      // celsius
     pressure?: number;      // hPa
-    cloudBase?: number;     // meters (raw value from API)
-    cloudBaseDisplay?: string; // formatted with user's altitude unit preference
+    cloudBase?: number;     // meters AGL (Above Ground Level - raw value from Windy ECMWF API)
+    cloudBaseDisplay?: string; // formatted display string in feet
     visibility?: number;    // km (estimated from humidity)
     humidity?: number;      // %
     precipitation?: number; // mm
@@ -172,15 +172,31 @@ export async function getForecastTimeRange(
     try {
         const product = (store.get('product') as Products) || 'ecmwf';
 
-        const response: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
+        // Add timeout to prevent hanging
+        const fetchPromise = getPointForecastData(
             product,
             { lat, lon },
             {},
             {}
         );
 
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => {
+                reject(new Error('Forecast time range fetch timeout'));
+            }, 10000); // 10 second timeout
+        });
+
+        const response: HttpPayload<WeatherDataPayload<DataHash>> = await Promise.race([
+            fetchPromise,
+            timeoutPromise,
+        ]);
+
         const { data } = response.data;
         const timestamps = data.ts;
+
+        if (!timestamps || timestamps.length === 0) {
+            return null;
+        }
 
         return {
             start: timestamps[0],
@@ -258,30 +274,42 @@ export async function fetchWaypointWeather(
         // Cloud base from ECMWF model (cbase field) with interpolation
         // Note: Windy states "On large areas, forecast model is NOT ABLE TO CALCULATE CLOUD BASE"
         // If not available, we show N/A rather than an estimated value
+        // IMPORTANT: cbase is in AGL (Above Ground Level), stored as meters
+        // It will be converted to MSL in profileService.ts for altitude profile plotting
         let cloudBase: number | undefined;
         let cloudBaseDisplay: string | undefined;
         if (data.cbase && Array.isArray(data.cbase) && data.cbase.length > 0) {
             const cbaseLower = data.cbase[lowerIndex];
             const cbaseUpper = data.cbase[upperIndex];
-            
-            let cbaseValue: number | null;
+
+            // If either lower or upper value is null/invalid, use N/A
+            const isLowerValid = cbaseLower !== null && cbaseLower !== undefined && !isNaN(cbaseLower) && cbaseLower > 0;
+            const isUpperValid = cbaseUpper !== null && cbaseUpper !== undefined && !isNaN(cbaseUpper) && cbaseUpper > 0;
+
+            let cbaseValue: number | null = null;
+
             if (needsInterpolation) {
-                // When interpolation is needed (fraction between 0 and 1), use the interpolation function
-                cbaseValue = interpolateValue(cbaseLower, cbaseUpper, fraction);
+                // When interpolation is needed, BOTH values must be valid
+                if (isLowerValid && isUpperValid) {
+                    cbaseValue = interpolateValue(cbaseLower, cbaseUpper, fraction);
+                } else {
+                    // If either value is null, result is N/A
+                    cbaseValue = null;
+                }
             } else {
                 // When interpolation is NOT needed, check which timestamp we're exactly on
                 // If fraction is 1.0, we're exactly on the upper timestamp, use upper value
                 // If fraction is 0.0, we're exactly on the lower timestamp, use lower value
                 if (fraction >= 1.0) {
                     // Exactly on upper timestamp
-                    if (cbaseUpper !== null && cbaseUpper !== undefined && !isNaN(cbaseUpper) && cbaseUpper > 0) {
+                    if (isUpperValid) {
                         cbaseValue = cbaseUpper;
                     } else {
                         cbaseValue = null;
                     }
                 } else {
                     // Exactly on lower timestamp (fraction === 0)
-                    if (cbaseLower !== null && cbaseLower !== undefined && !isNaN(cbaseLower) && cbaseLower > 0) {
+                    if (isLowerValid) {
                         cbaseValue = cbaseLower;
                     } else {
                         cbaseValue = null;
@@ -412,26 +440,48 @@ export async function fetchFlightPlanWeather(
     // Calculate cumulative ETE to get arrival time at each waypoint
     let cumulativeEteMinutes = 0;
 
-    // Fetch weather for all waypoints in parallel
+    // Fetch weather for all waypoints in parallel with individual error handling
     const promises = waypoints.map(async (wp, index) => {
-        // Calculate target time for this waypoint
-        let targetTime: number | undefined;
+        try {
+            // Calculate target time for this waypoint
+            let targetTime: number | undefined;
 
-        if (departureTime) {
-            // Add cumulative ETE to departure time
-            targetTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
-        }
+            if (departureTime) {
+                // Add cumulative ETE to departure time
+                targetTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
+            }
 
-        // Add this waypoint's ETE to cumulative for next waypoint
-        cumulativeEteMinutes += wp.ete || 0;
+            // Add this waypoint's ETE to cumulative for next waypoint
+            cumulativeEteMinutes += wp.ete || 0;
 
-        const weather = await fetchWaypointWeather(wp.lat, wp.lon, pluginName, targetTime, wp.name, altitude, enableLogging);
-        if (weather) {
-            weatherMap.set(wp.id, weather);
+            // Add timeout to prevent hanging (15 seconds per waypoint)
+            const weatherPromise = fetchWaypointWeather(wp.lat, wp.lon, pluginName, targetTime, wp.name, altitude, enableLogging);
+            
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                    if (enableLogging) {
+                        console.warn(`[VFR] Weather fetch timeout for waypoint ${wp.name} (${wp.id})`);
+                    }
+                    resolve(null);
+                }, 15000); // Reduced to 15 seconds
+            });
+
+            const weather = await Promise.race([weatherPromise, timeoutPromise]);
+
+            if (weather) {
+                weatherMap.set(wp.id, weather);
+            }
+        } catch (error) {
+            // Individual waypoint errors shouldn't stop the entire operation
+            if (enableLogging) {
+                console.error(`[VFR] Error fetching weather for waypoint ${wp.name} (${wp.id}):`, error);
+            }
+            // Continue with other waypoints even if one fails
         }
     });
 
-    await Promise.all(promises);
+    // Use allSettled to ensure all promises complete (even if some fail)
+    await Promise.allSettled(promises);
 
     return weatherMap;
 }
@@ -483,7 +533,7 @@ export function checkWeatherAlerts(
     }
 
     // Cloud base alert
-    // Note: weather.cloudBase is in meters, but thresholds.cloudBase is in feet
+    // Note: weather.cloudBase is in meters AGL, but thresholds.cloudBase is in feet
     if (weather.cloudBase) {
         const cloudBaseFeet = metersToFeet(weather.cloudBase);
         // Use rounded value (no decimals)

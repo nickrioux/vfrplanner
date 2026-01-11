@@ -19,6 +19,12 @@
             >Route</button>
             <button
                 class="tab"
+                class:active={activeTab === 'profile'}
+                on:click={() => activeTab = 'profile'}
+                disabled={!flightPlan || flightPlan.waypoints.length < 2}
+            >Profile</button>
+            <button
+                class="tab"
                 class:active={activeTab === 'settings'}
                 on:click={() => activeTab = 'settings'}
             >Settings</button>
@@ -83,6 +89,13 @@
                 </button>
                 <button class="btn-action" on:click={handleExportGPX} title="Export as GPX">
                     📥 Export GPX
+                </button>
+                <button
+                    class="btn-action"
+                    on:click={handleSendToDistancePlanning}
+                    title="Open route in Windy Distance & Planning (new window)"
+                >
+                    🗺️ Send to D&P
                 </button>
                 <button
                     class="btn-action"
@@ -232,6 +245,24 @@
         {/if}
     {/if}
 
+    <!-- Profile Tab -->
+    {#if activeTab === 'profile' && flightPlan && flightPlan.waypoints.length >= 2}
+        {#if weatherData.size === 0}
+            <div class="profile-empty">
+                <p>Please click "Read Wx" to fetch weather data before viewing the profile.</p>
+            </div>
+        {:else}
+            <AltitudeProfile
+                {flightPlan}
+                {weatherData}
+                {settings}
+                maxAltitude={maxProfileAltitude}
+                scale={profileScale}
+                on:waypointClick={(e) => selectWaypointById(e.detail)}
+            />
+        {/if}
+    {/if}
+
     <!-- Settings Tab -->
     {#if activeTab === 'settings' && flightPlan}
         <div class="settings-section">
@@ -327,8 +358,10 @@
         type WeatherAlert,
         type ForecastTimeRange,
     } from './services/weatherService';
+    import { calculateProfileData, type SegmentCondition } from './services/profileService';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings } from './types';
     import { DEFAULT_SETTINGS } from './types';
+    import AltitudeProfile from './components/AltitudeProfile.svelte';
 
     import type { LatLon } from '@windy/interfaces';
 
@@ -344,7 +377,7 @@
     let isDragOver = false;
     let error: string | null = null;
     let fileInput: HTMLInputElement;
-    let activeTab: 'route' | 'settings' = 'route';
+    let activeTab: 'route' | 'profile' | 'settings' = 'route';
     let isAddingWaypoint = false;
 
     // Weather state
@@ -363,10 +396,31 @@
     // Settings
     let settings: PluginSettings = { ...DEFAULT_SETTINGS };
 
+    // Profile state
+    let maxProfileAltitude: number = 15000;
+    let profileScale: number = 511;
+
     // Map layers
-    let routeLayer: L.Polyline | null = null;
+    let routeLayer: L.LayerGroup | null = null;
     let waypointMarkers: L.LayerGroup | null = null;
     let markerMap: Map<string, L.Marker> = new Map();
+
+    /**
+     * Get segment color based on VFR condition
+     */
+    function getSegmentColor(condition?: SegmentCondition): string {
+        switch (condition) {
+            case 'good':
+                return '#4caf50'; // Green
+            case 'marginal':
+                return '#ff9800'; // Orange/Yellow
+            case 'poor':
+                return '#f44336'; // Red
+            case 'unknown':
+            default:
+                return '#757575'; // Gray
+        }
+    }
 
     // Waypoint icons by type
     function getWaypointIcon(type: WaypointType): string {
@@ -486,6 +540,16 @@
         map.panTo([wp.lat, wp.lon]);
     }
 
+    function selectWaypointById(waypointId: string) {
+        if (!flightPlan) return;
+        const wp = flightPlan.waypoints.find(w => w.id === waypointId);
+        if (wp) {
+            selectWaypoint(wp);
+            // Switch to route tab to show the selected waypoint
+            activeTab = 'route';
+        }
+    }
+
     function deleteWaypoint(waypointId: string) {
         if (!flightPlan) return;
 
@@ -595,6 +659,22 @@
         downloadGPX(flightPlan);
     }
 
+    function handleSendToDistancePlanning() {
+        if (!flightPlan || flightPlan.waypoints.length === 0) return;
+
+        // Build waypoints string: lat1,lon1;lat2,lon2;...
+        // Format matches Windy's distance URL format: /distance/lat1,lon1;lat2,lon2;...
+        const waypoints = flightPlan.waypoints
+            .map(wp => `${wp.lat.toFixed(4)},${wp.lon.toFixed(4)}`)
+            .join(';');
+
+        // Construct Windy URL with waypoints in the path
+        const windyUrl = `https://www.windy.com/distance/${waypoints}`;
+
+        // Open in new window
+        window.open(windyUrl, '_blank', 'noopener,noreferrer');
+    }
+
     function handleReverseRoute() {
         if (!flightPlan || flightPlan.waypoints.length < 2) return;
 
@@ -672,7 +752,23 @@
             // Fetch weather for all waypoints at their estimated arrival times
             // Use the planned altitude for wind data
             const plannedAltitude = flightPlan.aircraft.defaultAltitude;
-            weatherData = await fetchFlightPlanWeather(flightPlan.waypoints, name, departureTime, plannedAltitude, settings.enableLogging);
+            
+            // Add overall timeout to prevent infinite hanging (60 seconds total)
+            const weatherFetchPromise = fetchFlightPlanWeather(
+                flightPlan.waypoints,
+                name,
+                departureTime,
+                plannedAltitude,
+                settings.enableLogging
+            );
+
+            const overallTimeout = new Promise<Map<string, WaypointWeather>>((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('Weather fetch operation timed out after 60 seconds'));
+                }, 60000);
+            });
+
+            weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
 
             // Check for alerts at each waypoint
             weatherAlerts = new Map();
@@ -685,8 +781,16 @@
 
             // Recalculate navigation with wind corrections
             recalculateWithWind();
+
+            // Update map tooltips with the new weather data
+            updateMapLayers();
         } catch (err) {
             weatherError = err instanceof Error ? err.message : 'Failed to fetch weather';
+            console.error('[VFR Planner] Error fetching weather:', err);
+            // Ensure weatherData is at least an empty Map on error
+            if (!weatherData || weatherData.size === 0) {
+                weatherData = new Map();
+            }
         } finally {
             isLoadingWeather = false;
         }
@@ -867,13 +971,38 @@
 
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
 
-        // Create route polyline
-        const routeCoords = flightPlan.waypoints.map(wp => [wp.lat, wp.lon] as [number, number]);
-        routeLayer = new L.Polyline(routeCoords, {
-            color: '#3498db',
-            weight: 3,
-            opacity: 0.8,
-        });
+        // Calculate profile data to get segment conditions
+        const profileData = calculateProfileData(
+            flightPlan.waypoints,
+            weatherData,
+            flightPlan.aircraft.defaultAltitude
+        );
+
+        // Create route with color-coded segments
+        routeLayer = new L.LayerGroup();
+
+        // Create a polyline segment for each pair of waypoints
+        for (let i = 0; i < flightPlan.waypoints.length - 1; i++) {
+            const wp1 = flightPlan.waypoints[i];
+            const wp2 = flightPlan.waypoints[i + 1];
+            const condition = profileData[i]?.condition;
+
+            const segmentCoords: [number, number][] = [
+                [wp1.lat, wp1.lon],
+                [wp2.lat, wp2.lon]
+            ];
+
+            const segmentColor = getSegmentColor(condition);
+
+            const segment = new L.Polyline(segmentCoords, {
+                color: segmentColor,
+                weight: 4,
+                opacity: 0.8,
+            });
+
+            routeLayer.addLayer(segment);
+        }
+
         map.addLayer(routeLayer);
 
         // Create waypoint markers
@@ -920,9 +1049,46 @@
                 });
             }
 
-            const tooltipContent = `${index + 1}. ${wp.name}${wp.comment ? ` - ${wp.comment}` : ''}`;
+            // Build tooltip content with weather and condition info
+            let tooltipContent = `<b>${index + 1}. ${wp.name}</b>${wp.comment ? `<br/><i>${wp.comment}</i>` : ''}`;
+
+            // Add weather data if available (matching Route Panel display)
+            const wx = getWaypointWeather(wp.id);
+            if (wx) {
+                tooltipContent += '<br/><div style="margin-top: 4px;">';
+                tooltipContent += `💨 ${formatWind(wx.windSpeed, wx.windDir, wx.windAltitude)}`;
+                tooltipContent += ` | 🌡️ ${formatTemperature(wx.temperature)}`;
+                tooltipContent += ` | ☁️ ${wx.cloudBaseDisplay ?? 'N/A'}`;
+                tooltipContent += '</div>';
+            }
+
+            // Add navigation data if not departure
+            if (index > 0) {
+                tooltipContent += '<br/><div style="margin-top: 2px; font-size: 11px;">';
+                tooltipContent += `${formatBearing(wp.bearing || 0)} | ${formatDistance(wp.distance || 0)}`;
+                if (wp.groundSpeed) {
+                    tooltipContent += ` | GS ${Math.round(wp.groundSpeed)}kt`;
+                }
+                tooltipContent += '</div>';
+            }
+
+            // Add condition information if available
+            const pointData = profileData[index];
+            if (pointData?.condition) {
+                const conditionColor = getSegmentColor(pointData.condition);
+                tooltipContent += `<br/><span style="color: ${conditionColor}; font-weight: bold; margin-top: 4px; display: inline-block;">Conditions: ${pointData.condition.toUpperCase()}</span>`;
+
+                if (pointData.conditionReasons && pointData.conditionReasons.length > 0) {
+                    tooltipContent += '<br/><span style="font-size: 10px;">';
+                    pointData.conditionReasons.forEach(reason => {
+                        tooltipContent += `<br/>⚠️ ${reason}`;
+                    });
+                    tooltipContent += '</span>';
+                }
+            }
+
             marker.bindTooltip(tooltipContent, {
-                permanent: settings.showLabels,
+                permanent: false,
                 direction: 'top',
             });
 
@@ -976,6 +1142,8 @@
                 departureTime,
                 syncWithWindy,
                 activeTab,
+                maxProfileAltitude,
+                profileScale,
                 version: '1.0', // For future migration
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionData));
@@ -1005,6 +1173,12 @@
             }
             if (sessionData.activeTab) {
                 activeTab = sessionData.activeTab;
+            }
+            if (typeof sessionData.maxProfileAltitude === 'number') {
+                maxProfileAltitude = sessionData.maxProfileAltitude;
+            }
+            if (typeof sessionData.profileScale === 'number') {
+                profileScale = sessionData.profileScale;
             }
 
             // Restore flight plan
@@ -1081,6 +1255,22 @@
         &.active {
             background: #3498db;
             color: white;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .profile-empty {
+        padding: 20px;
+        text-align: center;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 13px;
+
+        p {
+            margin: 0;
         }
     }
 
