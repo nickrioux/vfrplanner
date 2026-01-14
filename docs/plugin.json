@@ -1,0 +1,19 @@
+{
+  "name": "windy-plugin-vfr-planner",
+  "version": "0.1.0",
+  "icon": "✈️",
+  "title": "VFR Flight Planner",
+  "description": "VFR flight planning with ForeFlight import support",
+  "author": "Nicolas",
+  "repository": "https://github.com/nrioux/windy-plugin-vfr-planner",
+  "desktopUI": "rhpane",
+  "mobileUI": "fullscreen",
+  "desktopWidth": 400,
+  "routerPath": "/vfr-planner",
+  "private": true,
+  "addToContextmenu": true,
+  "listenToSingleclick": true,
+  "built": 1768351950953,
+  "builtReadable": "2026-01-14T00:52:30.953Z",
+  "screenshot": "screenshot.jpg"
+}
