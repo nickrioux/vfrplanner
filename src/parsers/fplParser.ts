@@ -1,0 +1,326 @@
+/**
+ * ForeFlight/Garmin FPL file parser
+ * Parses XML files conforming to Garmin FlightPlan v1 schema
+ */
+
+import { XMLParser } from 'fast-xml-parser';
+import type {
+    FPLFlightPlan,
+    FPLWaypoint,
+    FPLRoute,
+    FPLRoutePoint,
+    FPLParseResult,
+    FPLValidationResult,
+    FPLValidationError,
+    WaypointType,
+} from '../types/fpl';
+import type { FlightPlan, Waypoint } from '../types/flightPlan';
+
+const VALID_WAYPOINT_TYPES: WaypointType[] = [
+    'AIRPORT',
+    'USER WAYPOINT',
+    'VOR',
+    'NDB',
+    'INT',
+    'INT-VRP',
+];
+
+const xmlParser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '@_',
+    parseAttributeValue: true,
+    trimValues: true,
+});
+
+/**
+ * Parse waypoint type string to WaypointType enum
+ */
+function parseWaypointType(typeStr: string): WaypointType {
+    const normalized = typeStr.toUpperCase().trim();
+    if (VALID_WAYPOINT_TYPES.includes(normalized as WaypointType)) {
+        return normalized as WaypointType;
+    }
+    // Default to USER WAYPOINT for unknown types
+    return 'USER WAYPOINT';
+}
+
+/**
+ * Parse a single waypoint from the waypoint-table
+ */
+function parseWaypoint(wpData: Record<string, unknown>): FPLWaypoint {
+    return {
+        identifier: String(wpData['identifier'] || '').toUpperCase(),
+        type: parseWaypointType(String(wpData['type'] || 'USER WAYPOINT')),
+        countryCode: String(wpData['country-code'] || ''),
+        lat: Number(wpData['lat']) || 0,
+        lon: Number(wpData['lon']) || 0,
+        comment: wpData['comment'] ? String(wpData['comment']) : undefined,
+        elevation: wpData['elevation'] !== undefined ? Number(wpData['elevation']) : undefined,
+    };
+}
+
+/**
+ * Parse the waypoint-table section
+ */
+function parseWaypointTable(tableData: Record<string, unknown>): FPLWaypoint[] {
+    const waypoints: FPLWaypoint[] = [];
+
+    if (!tableData || !tableData['waypoint']) {
+        return waypoints;
+    }
+
+    // Handle both single waypoint and array of waypoints
+    const wpArray = Array.isArray(tableData['waypoint'])
+        ? tableData['waypoint']
+        : [tableData['waypoint']];
+
+    for (const wp of wpArray) {
+        if (wp && typeof wp === 'object') {
+            waypoints.push(parseWaypoint(wp as Record<string, unknown>));
+        }
+    }
+
+    return waypoints;
+}
+
+/**
+ * Parse a single route-point
+ */
+function parseRoutePoint(rpData: Record<string, unknown>): FPLRoutePoint {
+    return {
+        waypointIdentifier: String(rpData['waypoint-identifier'] || '').toUpperCase(),
+        waypointType: parseWaypointType(String(rpData['waypoint-type'] || 'USER WAYPOINT')),
+        waypointCountryCode: String(rpData['waypoint-country-code'] || ''),
+    };
+}
+
+/**
+ * Parse the route section
+ */
+function parseRoute(routeData: Record<string, unknown>): FPLRoute | undefined {
+    if (!routeData) {
+        return undefined;
+    }
+
+    const points: FPLRoutePoint[] = [];
+
+    if (routeData['route-point']) {
+        const rpArray = Array.isArray(routeData['route-point'])
+            ? routeData['route-point']
+            : [routeData['route-point']];
+
+        for (const rp of rpArray) {
+            if (rp && typeof rp === 'object') {
+                points.push(parseRoutePoint(rp as Record<string, unknown>));
+            }
+        }
+    }
+
+    return {
+        name: String(routeData['route-name'] || 'Unnamed Route'),
+        description: routeData['route-description'] ? String(routeData['route-description']) : undefined,
+        flightPlanIndex: Number(routeData['flight-plan-index']) || 1,
+        points,
+    };
+}
+
+/**
+ * Parse an FPL XML string into FPLFlightPlan structure
+ */
+export function parseFPL(xmlString: string): FPLParseResult {
+    try {
+        const parsed = xmlParser.parse(xmlString);
+        const fp = parsed['flight-plan'];
+
+        if (!fp) {
+            return {
+                success: false,
+                error: 'Invalid FPL file: missing flight-plan root element',
+            };
+        }
+
+        if (!fp['waypoint-table']) {
+            return {
+                success: false,
+                error: 'Invalid FPL file: missing waypoint-table',
+            };
+        }
+
+        const flightPlan: FPLFlightPlan = {
+            created: fp['created'] ? new Date(fp['created']) : undefined,
+            waypointTable: parseWaypointTable(fp['waypoint-table']),
+            route: fp['route'] ? parseRoute(fp['route']) : undefined,
+        };
+
+        return {
+            success: true,
+            flightPlan,
+        };
+    } catch (error) {
+        return {
+            success: false,
+            error: `Failed to parse FPL file: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        };
+    }
+}
+
+/**
+ * Validate an FPL flight plan
+ */
+export function validateFPL(flightPlan: FPLFlightPlan): FPLValidationResult {
+    const errors: FPLValidationError[] = [];
+
+    // Validate waypoint table
+    if (!flightPlan.waypointTable || flightPlan.waypointTable.length === 0) {
+        errors.push({
+            field: 'waypointTable',
+            message: 'Flight plan must contain at least one waypoint',
+        });
+    }
+
+    // Validate each waypoint
+    for (let i = 0; i < flightPlan.waypointTable.length; i++) {
+        const wp = flightPlan.waypointTable[i];
+
+        if (!wp.identifier || wp.identifier.length === 0) {
+            errors.push({
+                field: `waypointTable[${i}].identifier`,
+                message: 'Waypoint identifier is required',
+            });
+        } else if (wp.identifier.length > 12) {
+            errors.push({
+                field: `waypointTable[${i}].identifier`,
+                message: 'Waypoint identifier must be 12 characters or less',
+                value: wp.identifier,
+            });
+        }
+
+        if (wp.lat < -90 || wp.lat > 90) {
+            errors.push({
+                field: `waypointTable[${i}].lat`,
+                message: 'Latitude must be between -90 and 90',
+                value: wp.lat,
+            });
+        }
+
+        if (wp.lon < -180 || wp.lon > 180) {
+            errors.push({
+                field: `waypointTable[${i}].lon`,
+                message: 'Longitude must be between -180 and 180',
+                value: wp.lon,
+            });
+        }
+    }
+
+    // Validate route points reference existing waypoints
+    if (flightPlan.route) {
+        const waypointIds = new Set(flightPlan.waypointTable.map(wp => wp.identifier));
+
+        for (let i = 0; i < flightPlan.route.points.length; i++) {
+            const rp = flightPlan.route.points[i];
+            if (!waypointIds.has(rp.waypointIdentifier)) {
+                errors.push({
+                    field: `route.points[${i}].waypointIdentifier`,
+                    message: `Route point references unknown waypoint: ${rp.waypointIdentifier}`,
+                    value: rp.waypointIdentifier,
+                });
+            }
+        }
+    }
+
+    return {
+        valid: errors.length === 0,
+        errors,
+    };
+}
+
+/**
+ * Generate a unique ID for a waypoint
+ */
+function generateWaypointId(identifier: string, index: number): string {
+    return `${identifier}-${index}-${Date.now()}`;
+}
+
+/**
+ * Convert FPL flight plan to internal FlightPlan format
+ */
+export function convertToFlightPlan(fpl: FPLFlightPlan, filename?: string): FlightPlan {
+    // Build waypoint lookup map
+    const waypointMap = new Map<string, FPLWaypoint>();
+    for (const wp of fpl.waypointTable) {
+        waypointMap.set(wp.identifier, wp);
+    }
+
+    // Determine waypoint order from route or use table order
+    let orderedWaypoints: FPLWaypoint[];
+    if (fpl.route && fpl.route.points.length > 0) {
+        orderedWaypoints = fpl.route.points
+            .map(rp => waypointMap.get(rp.waypointIdentifier))
+            .filter((wp): wp is FPLWaypoint => wp !== undefined);
+    } else {
+        orderedWaypoints = fpl.waypointTable;
+    }
+
+    // Convert to internal Waypoint format
+    const waypoints: Waypoint[] = orderedWaypoints.map((fplWp, index) => ({
+        id: generateWaypointId(fplWp.identifier, index),
+        name: fplWp.identifier,
+        type: fplWp.type,
+        lat: fplWp.lat,
+        lon: fplWp.lon,
+        comment: fplWp.comment,
+        elevation: fplWp.elevation,
+    }));
+
+    // Generate flight plan name
+    const planName = fpl.route?.name
+        || (waypoints.length >= 2
+            ? `${waypoints[0].name} to ${waypoints[waypoints.length - 1].name}`
+            : 'Unnamed Flight Plan');
+
+    return {
+        id: `fp-${Date.now()}`,
+        name: planName,
+        waypoints,
+        aircraft: {
+            airspeed: 100, // Default TAS in knots
+            defaultAltitude: 3000, // Default altitude in feet
+        },
+        totals: {
+            distance: 0, // Will be calculated by navigation service
+            ete: 0,
+        },
+        sourceFile: filename,
+        sourceFormat: 'fpl',
+    };
+}
+
+/**
+ * Read and parse an FPL file from a File object
+ */
+export async function readFPLFile(file: File): Promise<FPLParseResult> {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+
+        reader.onload = (event) => {
+            const content = event.target?.result;
+            if (typeof content === 'string') {
+                resolve(parseFPL(content));
+            } else {
+                resolve({
+                    success: false,
+                    error: 'Failed to read file content',
+                });
+            }
+        };
+
+        reader.onerror = () => {
+            resolve({
+                success: false,
+                error: 'Failed to read file',
+            });
+        };
+
+        reader.readAsText(file);
+    });
+}
