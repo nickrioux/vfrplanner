@@ -14,6 +14,9 @@ export interface PluginSettings {
     // Debug options
     enableLogging: boolean;
 
+    // Terrain profile options
+    terrainSampleInterval: number; // NM between terrain elevation samples (1-10)
+
     // Units (for future use)
     distanceUnit: 'nm' | 'km' | 'mi';
     altitudeUnit: 'ft' | 'm';
@@ -26,6 +29,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     showLabels: false,
     allowDrag: true,
     enableLogging: true,
+    terrainSampleInterval: 5, // Sample every 5 NM by default
     distanceUnit: 'nm',
     altitudeUnit: 'ft',
     speedUnit: 'kt',

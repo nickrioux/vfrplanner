@@ -3,7 +3,7 @@
  * Uses Windy's point forecast API
  */
 
-import { getPointForecastData } from '@windy/fetch';
+import { getPointForecastData, getMeteogramForecastData } from '@windy/fetch';
 import metrics from '@windy/metrics';
 import store from '@windy/store';
 import type { DataHash, WeatherDataPayload } from '@windy/interfaces';
@@ -11,11 +11,21 @@ import type { Products } from '@windy/rootScope';
 import type { HttpPayload } from '@windy/http';
 import type { Waypoint } from '../types/flightPlan';
 
+/** Wind data at a specific pressure level */
+export interface LevelWind {
+    level: string;          // e.g., '850h', '700h'
+    altitudeFeet: number;   // approximate altitude in feet
+    windSpeed: number;      // knots
+    windDir: number;        // degrees
+}
+
 export interface WaypointWeather {
     windSpeed: number;      // knots
     windDir: number;        // degrees
     windGust?: number;      // knots
     windAltitude?: number;  // feet MSL - altitude at which wind was measured
+    windLevel?: string;     // pressure level used (e.g., '850h-900h')
+    verticalWinds?: LevelWind[];  // wind at each pressure level
     temperature: number;    // celsius
     dewPoint?: number;      // celsius
     pressure?: number;      // hPa
@@ -73,6 +83,90 @@ function metersToFeet(m: number): number {
 }
 
 /**
+ * Pressure level definitions with approximate altitudes
+ */
+const PRESSURE_LEVELS = [
+    { level: 'surface', altitudeFeet: 0 },
+    { level: '1000h', altitudeFeet: 330 },
+    { level: '950h', altitudeFeet: 1600 },
+    { level: '900h', altitudeFeet: 3300 },
+    { level: '850h', altitudeFeet: 5000 },
+    { level: '700h', altitudeFeet: 10000 },
+    { level: '500h', altitudeFeet: 18000 },
+    { level: '300h', altitudeFeet: 30000 },
+    { level: '200h', altitudeFeet: 39000 },
+] as const;
+
+/**
+ * Convert altitude in feet MSL to approximate pressure level (hPa)
+ * Uses standard atmosphere model
+ * @param altitudeFeet - Altitude in feet MSL
+ * @returns Pressure level string (e.g., "850h") or "surface" for low altitudes
+ */
+function altitudeToPressureLevel(altitudeFeet: number): string {
+    if (altitudeFeet < 500) {
+        return 'surface';
+    }
+    
+    // Find the appropriate level
+    for (let i = PRESSURE_LEVELS.length - 1; i >= 0; i--) {
+        if (altitudeFeet >= PRESSURE_LEVELS[i].altitudeFeet) {
+            return PRESSURE_LEVELS[i].level;
+        }
+    }
+    
+    return 'surface';
+}
+
+/**
+ * Get the two pressure levels that bracket the target altitude for interpolation
+ * @param altitudeFeet - Target altitude in feet MSL
+ * @returns Object with lower and upper pressure levels and their altitudes, plus interpolation fraction
+ */
+function getBracketingPressureLevels(altitudeFeet: number): {
+    lower: { level: string; altitudeFeet: number };
+    upper: { level: string; altitudeFeet: number };
+    fraction: number; // 0-1, how far between lower and upper
+} | null {
+    if (altitudeFeet < 0) {
+        return null;
+    }
+    
+    // If below lowest level, use surface only
+    if (altitudeFeet < PRESSURE_LEVELS[1].altitudeFeet) {
+        return {
+            lower: PRESSURE_LEVELS[0],
+            upper: PRESSURE_LEVELS[1],
+            fraction: altitudeFeet / PRESSURE_LEVELS[1].altitudeFeet
+        };
+    }
+    
+    // Find the two levels that bracket the altitude
+    for (let i = 1; i < PRESSURE_LEVELS.length; i++) {
+        const lower = PRESSURE_LEVELS[i - 1];
+        const upper = PRESSURE_LEVELS[i];
+        
+        if (altitudeFeet >= lower.altitudeFeet && altitudeFeet <= upper.altitudeFeet) {
+            const altitudeRange = upper.altitudeFeet - lower.altitudeFeet;
+            const fraction = altitudeRange > 0 
+                ? (altitudeFeet - lower.altitudeFeet) / altitudeRange 
+                : 0;
+            
+            return { lower, upper, fraction };
+        }
+    }
+    
+    // Above highest level, use highest two levels
+    const last = PRESSURE_LEVELS[PRESSURE_LEVELS.length - 1];
+    const secondLast = PRESSURE_LEVELS[PRESSURE_LEVELS.length - 2];
+    return {
+        lower: secondLast,
+        upper: last,
+        fraction: 1.0 // At or above highest level
+    };
+}
+
+/**
  * Estimate visibility from relative humidity (rough approximation)
  */
 function estimateVisibility(humidity: number): number {
@@ -82,6 +176,397 @@ function estimateVisibility(humidity: number): number {
     if (humidity >= 90) return 5;
     if (humidity >= 80) return 10;
     return 20;
+}
+
+/**
+ * Fetches vertical wind data for all pressure levels using getMeteogramForecastData with extended: 'true'
+ * This is the approach used by the flyxc windy-sounding plugin
+ * @param lat - Latitude
+ * @param lon - Longitude
+ * @param enableLogging - Enable debug logging
+ * @returns Object with wind data at each pressure level (windU-XXXh, windV-XXXh keys)
+ */
+export async function fetchVerticalWindData(
+    lat: number,
+    lon: number,
+    enableLogging: boolean = false
+): Promise<any | null> {
+    try {
+        // Log the request parameters
+        const requestParams = {
+            model: 'ecmwf',
+            location: { lat, lon, step: 1 },
+            options: { extended: 'true' }
+        };
+
+        if (enableLogging) {
+            console.log(`[VFR Debug] ========== getMeteogramForecastData REQUEST ==========`);
+            console.log(`[VFR Debug] Request params:`, JSON.stringify(requestParams, null, 2));
+        }
+
+        // Use getMeteogramForecastData with extended: 'true' to get all pressure levels
+        // This is the approach used by flyxc windy-sounding plugin
+        const result = await getMeteogramForecastData(
+            'ecmwf' as any,  // model
+            { lat, lon, step: 1 },  // location with step
+            { extended: 'true' }  // extended option to get all pressure levels
+        );
+
+        if (enableLogging) {
+            console.log(`[VFR Debug] ========== getMeteogramForecastData RAW RESPONSE ==========`);
+            console.log(`[VFR Debug] Full result object:`, result);
+            console.log(`[VFR Debug] Result type:`, typeof result);
+            console.log(`[VFR Debug] Result keys:`, result ? Object.keys(result) : 'null');
+
+            if (result?.data) {
+                console.log(`[VFR Debug] result.data keys:`, Object.keys(result.data));
+                console.log(`[VFR Debug] result.data:`, result.data);
+            }
+
+            if (result?.data?.data) {
+                const dataKeys = Object.keys(result.data.data);
+                console.log(`[VFR Debug] result.data.data keys (${dataKeys.length}):`, dataKeys);
+                // Show wind-related keys specifically
+                const windKeys = dataKeys.filter(k => k.includes('wind') || k.includes('Wind'));
+                console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+                // Log sample values for first wind key
+                if (windKeys.length > 0) {
+                    console.log(`[VFR Debug] Sample ${windKeys[0]}:`, result.data.data[windKeys[0]]);
+                }
+            }
+            console.log(`[VFR Debug] ========================================================`);
+        }
+
+        return result?.data?.data || null;
+    } catch (error) {
+        console.error('[VFR Planner] Error fetching vertical wind data:', error);
+        if (enableLogging) {
+            console.log(`[VFR Debug] Error details:`, error);
+        }
+        return null;
+    }
+}
+
+/**
+ * Meteogram pressure levels with approximate altitudes in feet
+ * These are the levels available from getMeteogramForecastData with extended: 'true'
+ * Includes all standard pressure levels from surface to stratosphere
+ */
+const METEOGRAM_PRESSURE_LEVELS = [
+    { level: '1000h', altitudeFeet: 330 },
+    { level: '975h', altitudeFeet: 1000 },
+    { level: '950h', altitudeFeet: 1600 },
+    { level: '925h', altitudeFeet: 2500 },
+    { level: '900h', altitudeFeet: 3300 },
+    { level: '850h', altitudeFeet: 5000 },
+    { level: '800h', altitudeFeet: 6200 },
+    { level: '700h', altitudeFeet: 10000 },
+    { level: '600h', altitudeFeet: 14000 },
+    { level: '500h', altitudeFeet: 18000 },
+    { level: '400h', altitudeFeet: 23500 },
+    { level: '300h', altitudeFeet: 30000 },
+    { level: '250h', altitudeFeet: 34000 },
+    { level: '200h', altitudeFeet: 39000 },
+    { level: '150h', altitudeFeet: 45000 },
+    { level: '100h', altitudeFeet: 53000 },
+];
+
+/**
+ * Extracts wind at a specific altitude from meteogram vertical data
+ * Interpolates between pressure levels based on altitude
+ * @param meteogramData - Data from getMeteogramForecastData with extended: 'true'
+ * @param altitudeFt - Target altitude in feet MSL
+ * @param timeIndex - Index in the time series (0 for current)
+ * @param enableLogging - Enable debug logging
+ * @returns Wind speed (knots) and direction (degrees), or null if not available
+ */
+export function getWindAtAltitudeFromMeteogram(
+    meteogramData: any,
+    altitudeFt: number,
+    timeIndex: number = 0,
+    enableLogging: boolean = false
+): { windSpeed: number; windDir: number; level: string } | null {
+    if (!meteogramData) return null;
+
+    // First, get all available wind levels using dynamic key discovery
+    const allWinds = getAllWindLevelsFromMeteogram(meteogramData, timeIndex, false); // Don't double-log
+
+    if (allWinds.length === 0) {
+        if (enableLogging) {
+            console.log(`[VFR Debug] getWindAtAltitude: No wind levels found in meteogram data`);
+        }
+        return null;
+    }
+
+    // Sort by altitude
+    const sortedWinds = [...allWinds].sort((a, b) => a.altitudeFeet - b.altitudeFeet);
+
+    if (enableLogging) {
+        console.log(`[VFR Debug] getWindAtAltitude: target=${altitudeFt}ft, available levels:`,
+            sortedWinds.map(w => `${w.level}(${w.altitudeFeet}ft)`));
+    }
+
+    // Find bracketing levels
+    let lowerWind = sortedWinds[0];
+    let upperWind = sortedWinds[sortedWinds.length - 1];
+
+    for (let i = 0; i < sortedWinds.length - 1; i++) {
+        if (altitudeFt >= sortedWinds[i].altitudeFeet && altitudeFt <= sortedWinds[i + 1].altitudeFeet) {
+            lowerWind = sortedWinds[i];
+            upperWind = sortedWinds[i + 1];
+            break;
+        }
+    }
+
+    // If altitude is below lowest level, use lowest
+    if (altitudeFt < sortedWinds[0].altitudeFeet) {
+        lowerWind = sortedWinds[0];
+        upperWind = sortedWinds[0];
+    }
+    // If altitude is above highest level, use highest
+    if (altitudeFt > sortedWinds[sortedWinds.length - 1].altitudeFeet) {
+        lowerWind = sortedWinds[sortedWinds.length - 1];
+        upperWind = sortedWinds[sortedWinds.length - 1];
+    }
+
+    // Interpolate between the two levels
+    let windSpeed: number;
+    let windDir: number;
+    let usedLevel: string;
+
+    if (lowerWind === upperWind) {
+        // Same level - no interpolation needed
+        windSpeed = lowerWind.windSpeed;
+        windDir = lowerWind.windDir;
+        usedLevel = lowerWind.level;
+    } else {
+        // Interpolate
+        const altRange = upperWind.altitudeFeet - lowerWind.altitudeFeet;
+        const fraction = altRange > 0 ? (altitudeFt - lowerWind.altitudeFeet) / altRange : 0;
+
+        // For wind direction, we need to handle the wrap-around at 360°
+        let dirDiff = upperWind.windDir - lowerWind.windDir;
+        if (dirDiff > 180) dirDiff -= 360;
+        if (dirDiff < -180) dirDiff += 360;
+        windDir = lowerWind.windDir + dirDiff * fraction;
+        if (windDir < 0) windDir += 360;
+        if (windDir >= 360) windDir -= 360;
+
+        // Linear interpolation for speed
+        windSpeed = lowerWind.windSpeed + (upperWind.windSpeed - lowerWind.windSpeed) * fraction;
+        usedLevel = `${lowerWind.level}-${upperWind.level}`;
+
+        if (enableLogging) {
+            console.log(`[VFR Debug] Interpolating: ${lowerWind.level}(${lowerWind.altitudeFeet}ft) -> ${upperWind.level}(${upperWind.altitudeFeet}ft), fraction=${fraction.toFixed(2)}`);
+        }
+    }
+
+    if (enableLogging) {
+        console.log(`[VFR Debug] Result: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedLevel})`);
+    }
+
+    return {
+        windSpeed,
+        windDir,
+        level: usedLevel
+    };
+}
+
+/**
+ * Find wind U/V key pairs dynamically from meteogram data
+ * Searches for patterns like windU-850h, wind_u-850h, gh-850h, etc.
+ */
+function findWindKeyPairs(meteogramData: any, enableLogging: boolean = false): Map<string, { uKey: string; vKey: string }> {
+    const allKeys = Object.keys(meteogramData);
+    const levelKeyPairs = new Map<string, { uKey: string; vKey: string }>();
+
+    // First, find all wind-related U keys and extract their level
+    const uKeyPattern = /^(windU|wind_u|wind-u|gh)[-_]?(\d+h?)$/i;
+    const vKeyPattern = /^(windV|wind_v|wind-v|gh)[-_]?(\d+h?)$/i;
+
+    // Find all potential U keys
+    const uKeysByLevel = new Map<string, string>();
+    const vKeysByLevel = new Map<string, string>();
+
+    for (const key of allKeys) {
+        // Check for U component patterns
+        let match = key.match(/wind.*[uU][-_]?(\d+h?)/i);
+        if (match) {
+            const level = match[1].endsWith('h') ? match[1] : `${match[1]}h`;
+            uKeysByLevel.set(level, key);
+            continue;
+        }
+
+        // Check for V component patterns
+        match = key.match(/wind.*[vV][-_]?(\d+h?)/i);
+        if (match) {
+            const level = match[1].endsWith('h') ? match[1] : `${match[1]}h`;
+            vKeysByLevel.set(level, key);
+        }
+    }
+
+    if (enableLogging) {
+        console.log(`[VFR Debug] Found U keys:`, Array.from(uKeysByLevel.entries()));
+        console.log(`[VFR Debug] Found V keys:`, Array.from(vKeysByLevel.entries()));
+    }
+
+    // Match U and V keys by level
+    for (const [level, uKey] of uKeysByLevel) {
+        const vKey = vKeysByLevel.get(level);
+        if (vKey) {
+            levelKeyPairs.set(level, { uKey, vKey });
+        }
+    }
+
+    return levelKeyPairs;
+}
+
+/**
+ * Extracts wind at ALL pressure levels from meteogram data
+ * Dynamically finds wind keys regardless of format (windU-850h, wind_u_850h, etc.)
+ * @param meteogramData - Data from getMeteogramForecastData with extended: 'true'
+ * @param timeIndex - Index in the time series (0 for current)
+ * @param enableLogging - Enable debug logging
+ * @returns Array of wind data at each available level
+ */
+export function getAllWindLevelsFromMeteogram(
+    meteogramData: any,
+    timeIndex: number = 0,
+    enableLogging: boolean = false
+): LevelWind[] {
+    if (!meteogramData) return [];
+
+    const winds: LevelWind[] = [];
+    const allKeys = Object.keys(meteogramData);
+
+    if (enableLogging) {
+        console.log(`[VFR Debug] getAllWindLevels - total keys: ${allKeys.length}`);
+        // Log wind-related keys
+        const windKeys = allKeys.filter(k => k.toLowerCase().includes('wind'));
+        console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+    }
+
+    // Try dynamic key discovery first
+    const keyPairs = findWindKeyPairs(meteogramData, enableLogging);
+
+    if (keyPairs.size > 0) {
+        if (enableLogging) {
+            console.log(`[VFR Debug] Using dynamic key discovery, found ${keyPairs.size} level pairs`);
+        }
+
+        for (const [level, { uKey, vKey }] of keyPairs) {
+            const uArr = meteogramData[uKey];
+            const vArr = meteogramData[vKey];
+
+            if (Array.isArray(uArr) && Array.isArray(vArr) && uArr.length > timeIndex && vArr.length > timeIndex) {
+                const u = uArr[timeIndex];
+                const v = vArr[timeIndex];
+
+                if (typeof u === 'number' && typeof v === 'number') {
+                    // Find altitude for this level - only accept known pressure levels
+                    const levelInfo = METEOGRAM_PRESSURE_LEVELS.find(pl => pl.level === level);
+                    if (!levelInfo) {
+                        // Skip unknown levels to avoid wrong altitude calculations
+                        if (enableLogging) {
+                            console.log(`[VFR Debug] Skipping unknown level: ${level}`);
+                        }
+                        continue;
+                    }
+
+                    const speedMs = Math.sqrt(u * u + v * v);
+                    const speedKt = speedMs * 1.94384;
+                    const dir = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
+
+                    winds.push({
+                        level,
+                        altitudeFeet: levelInfo.altitudeFeet,
+                        windSpeed: speedKt,
+                        windDir: dir
+                    });
+
+                    if (enableLogging) {
+                        console.log(`[VFR Debug] Level ${level} (${levelInfo.altitudeFeet}ft): ${uKey}=${u}, ${vKey}=${v} -> ${Math.round(dir)}°/${Math.round(speedKt)}kt`);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: try predefined key formats
+    if (winds.length === 0) {
+        if (enableLogging) {
+            console.log(`[VFR Debug] Dynamic discovery found no winds, trying predefined formats...`);
+        }
+
+        for (const pl of METEOGRAM_PRESSURE_LEVELS) {
+            // Try different key formats for U component
+            const uKeyVariants = [
+                `windU-${pl.level}`,
+                `wind_u-${pl.level}`,
+                `wind-u-${pl.level}`,
+                `windU_${pl.level}`,
+                `wind_u_${pl.level}`,
+            ];
+            const vKeyVariants = [
+                `windV-${pl.level}`,
+                `wind_v-${pl.level}`,
+                `wind-v-${pl.level}`,
+                `windV_${pl.level}`,
+                `wind_v_${pl.level}`,
+            ];
+
+            let u: number | undefined;
+            let v: number | undefined;
+            let foundUKey = '';
+            let foundVKey = '';
+
+            // Find matching U key
+            for (const key of uKeyVariants) {
+                if (meteogramData[key] !== undefined) {
+                    const arr = meteogramData[key];
+                    u = Array.isArray(arr) ? arr[timeIndex] : arr;
+                    foundUKey = key;
+                    break;
+                }
+            }
+
+            // Find matching V key
+            for (const key of vKeyVariants) {
+                if (meteogramData[key] !== undefined) {
+                    const arr = meteogramData[key];
+                    v = Array.isArray(arr) ? arr[timeIndex] : arr;
+                    foundVKey = key;
+                    break;
+                }
+            }
+
+            if (enableLogging && pl.level === '850h') {
+                console.log(`[VFR Debug] Predefined lookup for ${pl.level}: foundU=${foundUKey}(${u}), foundV=${foundVKey}(${v})`);
+            }
+
+            if (typeof u === 'number' && typeof v === 'number') {
+                const speedMs = Math.sqrt(u * u + v * v);
+                const speedKt = speedMs * 1.94384;
+                const dir = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
+
+                winds.push({
+                    level: pl.level,
+                    altitudeFeet: pl.altitudeFeet,
+                    windSpeed: speedKt,
+                    windDir: dir
+                });
+            }
+        }
+    }
+
+    // Sort by altitude (ascending - low to high)
+    winds.sort((a, b) => a.altitudeFeet - b.altitudeFeet);
+
+    if (enableLogging) {
+        console.log(`[VFR Debug] getAllWindLevels found ${winds.length} levels:`, winds.map(w => `${w.level}(${w.altitudeFeet}ft)`));
+    }
+
+    return winds;
 }
 
 /**
@@ -211,6 +696,7 @@ export async function getForecastTimeRange(
 
 /**
  * Fetch weather data for a single waypoint at a specific time
+ * Uses Windy Point Forecast API with pressure levels for altitude-specific wind data
  * @param altitude - Altitude in feet MSL for wind data (optional, defaults to surface)
  */
 export async function fetchWaypointWeather(
@@ -226,43 +712,308 @@ export async function fetchWaypointWeather(
         // Get current product from store (same as Windy picker uses)
         const product = store.get('product') as Products;
 
-        // Note: Currently fetching surface wind data
-        // Windy's API may support altitude-specific wind through different endpoints or parameters
-        // For now, we store the requested altitude and display it to the user
-        // The wind data returned is surface-level, but we indicate the planned altitude in the display
-        // Future enhancement: If Windy provides altitude-specific wind API, update this to fetch wind at the specified altitude
-        const options: Record<string, string> = {};
+        // Get bracketing pressure levels for interpolation if altitude is specified
+        let bracketingLevels: ReturnType<typeof getBracketingPressureLevels> | null = null;
+        let levels: string[] = ['surface'];
         
-        const response: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
+        if (altitude !== undefined && altitude > 0) {
+            bracketingLevels = getBracketingPressureLevels(altitude);
+            if (bracketingLevels) {
+                // Request both bracketing levels plus surface for other data
+                levels = ['surface', bracketingLevels.lower.level, bracketingLevels.upper.level];
+                // Remove duplicates
+                levels = [...new Set(levels)];
+                
+                if (enableLogging && waypointName) {
+                    console.log(`[VFR Planner] Fetching weather for ${waypointName} at ${altitude} ft MSL`);
+                    console.log(`[VFR Planner] Interpolating between ${bracketingLevels.lower.level} (${bracketingLevels.lower.altitudeFeet}ft) and ${bracketingLevels.upper.level} (${bracketingLevels.upper.altitudeFeet}ft)`);
+                    console.log(`[VFR Planner] Interpolation fraction: ${(bracketingLevels.fraction * 100).toFixed(1)}%`);
+                }
+            } else {
+                // Fallback to single level if bracketing fails
+                const pressureLevel = altitudeToPressureLevel(altitude);
+                levels = pressureLevel === 'surface' ? ['surface'] : ['surface', pressureLevel];
+                if (enableLogging && waypointName) {
+                    console.log(`[VFR Planner] Fetching weather for ${waypointName} at ${altitude} ft MSL (pressure level: ${pressureLevel})`);
+                }
+            }
+        } else {
+            if (enableLogging && waypointName) {
+                console.log(`[VFR Planner] Fetching weather for ${waypointName} at surface`);
+            }
+        }
+
+        // Try to use getPointForecastData with levels option first
+        // If that doesn't work, we'll try the direct API call
+        let response;
+        let responseData: any;
+        
+        try {
+            // First, try passing levels in options to getPointForecastData
+            // This might work if Windy's plugin API supports it
+            const options: Record<string, any> = {};
+            if (levels.length > 0 && levels[0] !== 'surface') {
+                options.levels = levels;
+            }
+            
+            try {
+                const pointForecastResponse: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
             product,
             { lat, lon },
             options,
             {}
         );
 
-        const { data } = response.data;
+                // Check if response has level-specific data
+                const data = pointForecastResponse.data?.data;
+                if (data && (data[`wind-${pressureLevel}`] || data.wind)) {
+                    // Response has the data we need
+                    responseData = data;
+                } else {
+                    // No level-specific data, try direct API
+                    throw new Error('No level-specific data in response');
+                }
+            } catch (pointForecastError) {
+                // getPointForecastData doesn't support levels, try direct API call
+                if (enableLogging && waypointName) {
+                    console.log(`[VFR Planner] getPointForecastData doesn't support levels, trying direct API for ${waypointName}`);
+                }
+                
+                const requestBody = {
+                    lat,
+                    lon,
+                    model: product,
+                    parameters: ['wind', 'windDir', 'temp', 'dewPoint', 'pressure', 'rh', 'mm', 'cbase', 'gust'],
+                    levels: levels
+                };
+
+                // Use native fetch to call Windy's Point Forecast API
+                // Note: This may require API key or may not work from plugin context
+                const apiUrl = 'https://api.windy.com/api/point-forecast/v2';
+                const apiResponse = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const responseStatus = apiResponse.status;
+                const responseStatusText = apiResponse.statusText;
+                
+                // Read response body once
+                let responseBodyText = '';
+                let apiResult: any = null;
+                try {
+                    responseBodyText = await apiResponse.text();
+                    if (responseBodyText) {
+                        apiResult = JSON.parse(responseBodyText);
+                    }
+                } catch (e) {
+                    responseBodyText = 'Could not parse response';
+                }
+
+                if (!apiResponse.ok) {
+                    throw new Error(`Point Forecast API returned ${responseStatus}: ${responseStatusText}`);
+                }
+
+                responseData = apiResult?.data || apiResult;
+            }
+        } catch (apiError) {
+            // If both methods fail, fall back to getPointForecastData for surface data
+            if (enableLogging && waypointName) {
+                console.warn(`[VFR Planner] Point Forecast API failed for ${waypointName}, falling back to surface data:`, apiError);
+            }
+            // Fall back to original method for surface data only
+            const fallbackResponse: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
+                product,
+                { lat, lon },
+                {},
+                {}
+            );
+            // Use the fallback response data (surface level only)
+            responseData = fallbackResponse.data?.data;
+            // Clear bracketing levels since we're using surface data only
+            bracketingLevels = null;
+            if (enableLogging && waypointName) {
+                console.log(`[VFR Planner] Using surface data fallback for ${waypointName}`);
+            }
+        }
+
+        // The response has data keys like 'wind-surface', 'wind-850h', 'windDir-850h', etc.
+        // responseData is already set above
+
+        // Debug: log available data keys and wind at all levels
+        if (enableLogging && waypointName) {
+            console.log(`[VFR Debug] Response data keys for ${waypointName}:`, Object.keys(responseData || {}));
+
+            // Check for wind-specific keys
+            const windKeys = Object.keys(responseData || {}).filter(k => k.includes('wind'));
+            console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+
+            // Log wind at all available pressure levels
+            const levels = [
+                { key: 'surface', alt: '10m AGL', desc: 'Surface wind' },
+                { key: '1000h', alt: '330 ft', desc: 'Near surface' },
+                { key: '950h', alt: '1,600 ft', desc: 'Low level' },
+                { key: '900h', alt: '3,300 ft', desc: 'Boundary layer' },
+                { key: '850h', alt: '5,000 ft', desc: 'GA / Low clouds' },
+                { key: '700h', alt: '10,000 ft', desc: 'Mid-altitude' },
+                { key: '500h', alt: '18,000 ft', desc: 'Mid-troposphere' },
+                { key: '300h', alt: '30,000 ft', desc: 'Jet stream' },
+                { key: '200h', alt: '39,000 ft', desc: 'Upper troposphere' },
+            ];
+
+            console.log(`[VFR Debug] ===== Wind at all levels for ${waypointName} =====`);
+            levels.forEach(level => {
+                const windKey = level.key === 'surface' ? 'wind' : `wind-${level.key}`;
+                const windDirKey = level.key === 'surface' ? 'windDir' : `windDir-${level.key}`;
+
+                const windArr = responseData[windKey] || responseData[`wind-${level.key}`];
+                const windDirArr = responseData[windDirKey] || responseData[`windDir-${level.key}`];
+
+                if (windArr && windDirArr) {
+                    // Get first value (current time) and convert m/s to knots
+                    const windMs = windArr[0];
+                    const windKt = Math.round(windMs * 1.94384);
+                    const windDeg = Math.round(windDirArr[0]);
+                    console.log(`[VFR Debug]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): ${String(windDeg).padStart(3, '0')}° @ ${String(windKt).padStart(2)}kt - ${level.desc}`);
+                } else {
+                    console.log(`[VFR Debug]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): N/A - ${level.desc}`);
+                }
+            });
+            console.log(`[VFR Debug] ================================================`);
+        }
+
+        // Get wind data at flight altitude using meteogram vertical data
+        let windSpeed: number | undefined;
+        let windDir: number | undefined;
+        let gustData: number[] | undefined;
+        let usedPressureLevel = 'surface';
+        let verticalWinds: LevelWind[] = [];
+
+        // Fetch meteogram data for vertical wind levels
+        console.log(`[VFR Debug] Fetching meteogram for ${waypointName}, altitude=${altitude}...`);
+        const meteogramData = await fetchVerticalWindData(lat, lon, true); // Always log for debugging
+        console.log(`[VFR Debug] Meteogram result for ${waypointName}:`, meteogramData ? `${Object.keys(meteogramData).length} keys` : 'NULL');
+
+        if (meteogramData) {
+            // Get all wind levels
+            verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, 0, true); // Always log for debugging
+            console.log(`[VFR Debug] Extracted ${verticalWinds.length} vertical wind levels`);
+
+            if (enableLogging && waypointName) {
+                console.log(`[VFR Planner] Vertical winds for ${waypointName}:`, verticalWinds.map(w =>
+                    `${w.level}(${w.altitudeFeet}ft): ${Math.round(w.windDir)}°@${Math.round(w.windSpeed)}kt`
+                ).join(', '));
+            }
+
+            // Try to get altitude-specific wind
+            if (altitude !== undefined && altitude > 0) {
+                const altitudeWind = getWindAtAltitudeFromMeteogram(meteogramData, altitude, 0, enableLogging);
+                if (altitudeWind) {
+                    windSpeed = altitudeWind.windSpeed;
+                    windDir = altitudeWind.windDir;
+                    usedPressureLevel = altitudeWind.level;
+
+                    if (enableLogging && waypointName) {
+                        console.log(`[VFR Planner] ✓ Wind at ${altitude}ft for ${waypointName}: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedPressureLevel})`);
+                    }
+                }
+            }
+        }
+
+        // Fallback to surface wind from point forecast if altitude wind not available
+        let windData: number[] | undefined;
+        let windDirData: number[] | undefined;
+
+        if (windSpeed === undefined || windDir === undefined) {
+            usedPressureLevel = 'surface';
+            windData = responseData['wind-surface'] || responseData.wind;
+            windDirData = responseData['windDir-surface'] || responseData.windDir;
+            gustData = responseData['gust-surface'] || responseData.gust;
+
+            if (enableLogging && waypointName) {
+                console.log(`[VFR Debug] Falling back to surface wind for ${waypointName}:`, {
+                    windDataFound: !!windData,
+                    windDirDataFound: !!windDirData,
+                    windSample: windData?.slice?.(0, 3),
+                    windDirSample: windDirData?.slice?.(0, 3)
+                });
+            }
+        } else {
+            // We have altitude wind, but still get gust from surface
+            gustData = responseData['gust-surface'] || responseData.gust;
+        }
+
+        // Get other data from surface level
+        const tempData = responseData['temp-surface'] || responseData.temp;
+        const dewPointData = responseData['dewPoint-surface'] || responseData.dewPoint;
+        const pressureData = responseData['pressure-surface'] || responseData.pressure;
+        const rhData = responseData['rh-surface'] || responseData.rh;
+        const mmData = responseData['mm-surface'] || responseData.mm;
+        const cbaseData = responseData['cbase-surface'] || responseData.cbase;
+
+        // Get timestamps
+        const timestamps = responseData.ts || responseData['ts-surface'] || [];
+
+        if (!timestamps || timestamps.length === 0) {
+            if (enableLogging) {
+                console.error(`[VFR Planner] No timestamp data for ${waypointName}`);
+            }
+            return null;
+        }
 
         // Use target timestamp if provided, otherwise use Windy's current timestamp
-        // This ensures our data matches what Windy's picker displays
         const windyTimestamp = store.get('timestamp') as number;
         const effectiveTimestamp = targetTimestamp ?? windyTimestamp ?? Date.now();
 
-        // Use interpolation like WindyVFRPlugIn does
-        const interp = getInterpolationIndices(data.ts, effectiveTimestamp);
+        // Interpolate to get values at the target time
+        const interp = getInterpolationIndices(timestamps, effectiveTimestamp);
         const { lowerIndex, upperIndex, fraction, needsInterpolation } = interp;
 
-        // Extract base weather data with interpolation
-        const tempLower = data.temp[lowerIndex] || 273.15;
-        const tempUpper = data.temp[upperIndex] || 273.15;
+        // Extract wind data - use altitude wind if available, otherwise interpolate from surface arrays
+        let finalWindSpeed: number;
+        let finalWindDir: number;
+
+        if (windSpeed !== undefined && windDir !== undefined) {
+            // Use altitude-specific wind (already in knots)
+            finalWindSpeed = windSpeed;
+            finalWindDir = windDir;
+        } else {
+            // Fallback: interpolate from surface wind arrays
+            const windLower = windData?.[lowerIndex] || 0;
+            const windUpper = windData?.[upperIndex] || 0;
+            const windMs = needsInterpolation
+                ? interpolateValue(windLower, windUpper, fraction) ?? 0
+                : windLower;
+            finalWindSpeed = msToKnots(windMs);
+
+            const windDirLower = windDirData?.[lowerIndex] || 0;
+            const windDirUpper = windDirData?.[upperIndex] || 0;
+            finalWindDir = windDirLower;
+            if (needsInterpolation && windDirData) {
+                let diff = windDirUpper - windDirLower;
+                if (diff > 180) diff -= 360;
+                if (diff < -180) diff += 360;
+                finalWindDir = windDirLower + diff * fraction;
+                if (finalWindDir < 0) finalWindDir += 360;
+                if (finalWindDir >= 360) finalWindDir -= 360;
+            }
+        }
+
+        // Extract other weather data
+        const tempLower = tempData?.[lowerIndex] || 273.15;
+        const tempUpper = tempData?.[upperIndex] || 273.15;
         const tempKelvin = needsInterpolation
             ? interpolateValue(tempLower, tempUpper, fraction) ?? 273.15
             : tempLower;
         const tempCelsius = kelvinToCelsius(tempKelvin);
 
         let dewPointCelsius: number | undefined;
-        if (data.dewPoint) {
-            const dewLower = data.dewPoint[lowerIndex];
-            const dewUpper = data.dewPoint[upperIndex];
+        if (dewPointData) {
+            const dewLower = dewPointData[lowerIndex];
+            const dewUpper = dewPointData[upperIndex];
             const dewKelvin = needsInterpolation
                 ? interpolateValue(dewLower, dewUpper, fraction)
                 : dewLower;
@@ -271,148 +1022,71 @@ export async function fetchWaypointWeather(
             }
         }
 
-        // Cloud base from ECMWF model (cbase field) with interpolation
-        // Note: Windy states "On large areas, forecast model is NOT ABLE TO CALCULATE CLOUD BASE"
-        // If not available, we show N/A rather than an estimated value
-        // IMPORTANT: cbase is in AGL (Above Ground Level), stored as meters
-        // It will be converted to MSL in profileService.ts for altitude profile plotting
+        // Cloud base (from surface level)
         let cloudBase: number | undefined;
         let cloudBaseDisplay: string | undefined;
-        if (data.cbase && Array.isArray(data.cbase) && data.cbase.length > 0) {
-            const cbaseLower = data.cbase[lowerIndex];
-            const cbaseUpper = data.cbase[upperIndex];
-
-            // If either lower or upper value is null/invalid, use N/A
+        if (cbaseData && Array.isArray(cbaseData) && cbaseData.length > 0) {
+            const cbaseLower = cbaseData[lowerIndex];
+            const cbaseUpper = cbaseData[upperIndex];
             const isLowerValid = cbaseLower !== null && cbaseLower !== undefined && !isNaN(cbaseLower) && cbaseLower > 0;
             const isUpperValid = cbaseUpper !== null && cbaseUpper !== undefined && !isNaN(cbaseUpper) && cbaseUpper > 0;
 
             let cbaseValue: number | null = null;
-
             if (needsInterpolation) {
-                // When interpolation is needed, BOTH values must be valid
                 if (isLowerValid && isUpperValid) {
                     cbaseValue = interpolateValue(cbaseLower, cbaseUpper, fraction);
-                } else {
-                    // If either value is null, result is N/A
-                    cbaseValue = null;
                 }
             } else {
-                // When interpolation is NOT needed, check which timestamp we're exactly on
-                // If fraction is 1.0, we're exactly on the upper timestamp, use upper value
-                // If fraction is 0.0, we're exactly on the lower timestamp, use lower value
-                if (fraction >= 1.0) {
-                    // Exactly on upper timestamp
-                    if (isUpperValid) {
-                        cbaseValue = cbaseUpper;
-                    } else {
-                        cbaseValue = null;
-                    }
-                } else {
-                    // Exactly on lower timestamp (fraction === 0)
-                    if (isLowerValid) {
-                        cbaseValue = cbaseLower;
-                    } else {
-                        cbaseValue = null;
-                    }
-                }
+                cbaseValue = isLowerValid ? cbaseLower : (isUpperValid ? cbaseUpper : null);
             }
 
             if (cbaseValue !== null && cbaseValue !== undefined && !isNaN(cbaseValue) && cbaseValue > 0) {
-                // Store raw value in meters
                 cloudBase = cbaseValue;
-                // Format with rounded value (no decimals) in feet
                 const cloudBaseFeet = metersToFeet(cloudBase);
                 cloudBaseDisplay = `${Math.round(cloudBaseFeet)} ft`;
             }
         }
-        // If cbase is not available, cloudBase remains undefined (shown as N/A in UI)
 
-        // Debug: log what we're getting vs what Windy shows
-        if (enableLogging) {
-            console.log('[VFR] Cloud base debug:', {
-                waypoint: waypointName || 'Unknown',
-                lat, lon,
-                product,
-                windyTimestamp: new Date(windyTimestamp).toISOString(),
-                effectiveTimestamp: new Date(effectiveTimestamp).toISOString(),
-                lowerIndex,
-                upperIndex,
-                fraction: fraction.toFixed(3),
-                needsInterpolation,
-                forecastTimeLower: new Date(data.ts[lowerIndex]).toISOString(),
-                forecastTimeUpper: new Date(data.ts[upperIndex]).toISOString(),
-                rawCbaseLower: data.cbase ? data.cbase[lowerIndex] : 'N/A',
-                rawCbaseUpper: data.cbase ? data.cbase[upperIndex] : 'N/A',
-                interpolatedCbase: cloudBase,
-                cloudBaseDisplay,
-            });
-
-            // Log full cbase table if available
-            if (data.cbase && Array.isArray(data.cbase) && data.cbase.length > 0) {
-                console.log('[VFR] Full cbase table:', {
-                    waypoint: waypointName || 'Unknown',
-                    timestamps: data.ts.map((ts: number) => new Date(ts).toISOString()),
-                    cbaseValues: data.cbase.map((cb: number | null | undefined, idx: number) => ({
-                        index: idx,
-                        timestamp: new Date(data.ts[idx]).toISOString(),
-                        cbase: cb !== null && cb !== undefined && !isNaN(cb) ? cb : null,
-                        cbaseFeet: cb !== null && cb !== undefined && !isNaN(cb) ? metersToFeet(cb) : null,
-                    })),
-                    totalPoints: data.cbase.length,
-                });
-            } else {
-                console.log('[VFR] cbase table:', {
-                    waypoint: waypointName || 'Unknown',
-                    message: 'Not available for this location',
-                });
-            }
-        }
-
-        // Interpolate wind values
-        const windLower = data.wind[lowerIndex] || 0;
-        const windUpper = data.wind[upperIndex] || 0;
-        const windMs = needsInterpolation
-            ? interpolateValue(windLower, windUpper, fraction) ?? 0
-            : windLower;
-
-        const windDirLower = data.windDir[lowerIndex] || 0;
-        const windDirUpper = data.windDir[upperIndex] || 0;
-        // Wind direction interpolation needs special handling for wrap-around
-        let windDir = windDirLower;
-        if (needsInterpolation) {
-            let diff = windDirUpper - windDirLower;
-            if (diff > 180) diff -= 360;
-            if (diff < -180) diff += 360;
-            windDir = windDirLower + diff * fraction;
-            if (windDir < 0) windDir += 360;
-            if (windDir >= 360) windDir -= 360;
-        }
+        // Extract gust data
+        const gustMs = gustData ? (needsInterpolation
+            ? interpolateValue(gustData[lowerIndex], gustData[upperIndex], fraction) ?? 0
+            : gustData[lowerIndex] || 0) : undefined;
 
         const weather: WaypointWeather = {
-            windSpeed: msToKnots(windMs),
-            windDir,
-            windGust: data.gust ? msToKnots(needsInterpolation
-                ? interpolateValue(data.gust[lowerIndex], data.gust[upperIndex], fraction) ?? 0
-                : data.gust[lowerIndex] || 0) : undefined,
+            windSpeed: finalWindSpeed,
+            windDir: finalWindDir,
+            windGust: gustMs !== undefined ? msToKnots(gustMs) : undefined,
             windAltitude: altitude, // Store the altitude at which wind was fetched
+            windLevel: usedPressureLevel,
+            verticalWinds: verticalWinds.length > 0 ? verticalWinds : undefined,
             temperature: tempCelsius,
             dewPoint: dewPointCelsius,
-            pressure: data.pressure ? (needsInterpolation
-                ? (interpolateValue(data.pressure[lowerIndex], data.pressure[upperIndex], fraction) ?? 0) / 100
-                : data.pressure[lowerIndex] / 100) : undefined, // Pa to hPa
+            pressure: pressureData ? (needsInterpolation
+                ? (interpolateValue(pressureData[lowerIndex], pressureData[upperIndex], fraction) ?? 0) / 100
+                : (pressureData[lowerIndex] || 0) / 100) : undefined, // Pa to hPa
             cloudBase,
             cloudBaseDisplay,
-            humidity: data.rh ? (needsInterpolation
-                ? interpolateValue(data.rh[lowerIndex], data.rh[upperIndex], fraction) ?? undefined
-                : data.rh[lowerIndex]) : undefined,
-            visibility: data.rh ? estimateVisibility(needsInterpolation
-                ? interpolateValue(data.rh[lowerIndex], data.rh[upperIndex], fraction) ?? 0
-                : data.rh[lowerIndex] || 0) : undefined,
-            precipitation: data.mm ? (needsInterpolation
-                ? interpolateValue(data.mm[lowerIndex], data.mm[upperIndex], fraction) ?? undefined
-                : data.mm[lowerIndex]) : undefined,
-            timestamp: data.ts[lowerIndex],
+            humidity: rhData ? (needsInterpolation
+                ? interpolateValue(rhData[lowerIndex], rhData[upperIndex], fraction) ?? undefined
+                : rhData[lowerIndex]) : undefined,
+            visibility: rhData ? estimateVisibility(needsInterpolation
+                ? interpolateValue(rhData[lowerIndex], rhData[upperIndex], fraction) ?? 0
+                : rhData[lowerIndex] || 0) : undefined,
+            precipitation: mmData ? (needsInterpolation
+                ? interpolateValue(mmData[lowerIndex], mmData[upperIndex], fraction) ?? undefined
+                : mmData[lowerIndex]) : undefined,
+            timestamp: timestamps[lowerIndex],
         };
+
+        if (enableLogging && waypointName) {
+            console.log(`[VFR Planner] Fetched weather for ${waypointName} at ${usedPressureLevel}:`, {
+                windSpeed: `${Math.round(weather.windSpeed)} kt`,
+                windDir: `${Math.round(weather.windDir)}°`,
+                windAltitude: weather.windAltitude ? `${weather.windAltitude} ft MSL` : 'surface',
+                temperature: `${Math.round(weather.temperature)}°C`,
+                pressureLevel: usedPressureLevel
+            });
+        }
 
         return weather;
     } catch (error) {

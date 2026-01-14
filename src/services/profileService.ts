@@ -4,8 +4,10 @@
  */
 
 import type { Waypoint } from '../types/flightPlan';
-import type { WaypointWeather } from './weatherService';
+import type { WaypointWeather, LevelWind } from './weatherService';
 import { calculateHeadwindComponent } from './navigationCalc';
+import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
+import { interpolateWindBetweenWaypoints, interpolateBearing } from '../utils/interpolation';
 
 /**
  * Convert meters to feet
@@ -241,6 +243,7 @@ export interface ProfileDataPoint {
     crosswindComponent: number; // Crosswind component in knots
     windSpeed: number;       // Total wind speed in knots
     windDir: number;         // Wind direction in degrees
+    verticalWinds?: LevelWind[]; // Wind data at all pressure levels for vertical wind display
     waypointId?: string;     // Associated waypoint ID
     waypointName?: string;   // Waypoint name for labeling
     condition?: SegmentCondition; // VFR condition assessment
@@ -248,113 +251,238 @@ export interface ProfileDataPoint {
 }
 
 /**
+ * Interpolate altitude between waypoints
+ * @param distance - Distance along route in NM
+ * @param waypoints - Array of waypoints
+ * @param defaultAltitude - Default altitude if no waypoint altitude specified
+ * @returns Interpolated altitude in feet MSL
+ */
+function interpolateAltitude(distance: number, waypoints: Waypoint[], defaultAltitude: number): number {
+    if (waypoints.length === 0) return defaultAltitude;
+    if (waypoints.length === 1) return waypoints[0].altitude ?? defaultAltitude;
+
+    let cumulativeDistance = 0;
+
+    // Find the two waypoints to interpolate between
+    for (let i = 0; i < waypoints.length - 1; i++) {
+        const wp1 = waypoints[i];
+        const wp2 = waypoints[i + 1];
+        const legDistance = wp1.distance || 0;
+
+        if (distance >= cumulativeDistance && distance <= cumulativeDistance + legDistance) {
+            // Interpolate between wp1 and wp2
+            const alt1 = wp1.altitude ?? defaultAltitude;
+            const alt2 = wp2.altitude ?? defaultAltitude;
+            const t = (distance - cumulativeDistance) / legDistance;
+            return alt1 + (alt2 - alt1) * t;
+        }
+
+        cumulativeDistance += legDistance;
+    }
+
+    // If beyond the end, return last waypoint altitude
+    return waypoints[waypoints.length - 1].altitude ?? defaultAltitude;
+}
+
+/**
  * Calculate profile data points for the altitude profile graph
+ * Includes ALL sampled elevation points for accurate terrain visualization,
+ * plus waypoints with full weather and condition data
  * @param waypoints - Array of waypoints from the flight plan
  * @param weatherData - Map of waypoint ID to weather data
  * @param defaultAltitude - Default altitude in feet (from flight plan aircraft profile)
+ * @param elevationProfile - Optional array of elevation points from terrain sampling
  * @returns Array of profile data points
  */
 export function calculateProfileData(
     waypoints: Waypoint[],
     weatherData: Map<string, WaypointWeather>,
-    defaultAltitude: number = 3000
+    defaultAltitude: number = 3000,
+    elevationProfile: ElevationPoint[] = []
 ): ProfileDataPoint[] {
     if (waypoints.length === 0) {
         return [];
     }
 
     const profilePoints: ProfileDataPoint[] = [];
-    let cumulativeDistance = 0;
 
-    waypoints.forEach((wp, index) => {
-        // Get weather data for this waypoint
-        const wx = weatherData.get(wp.id);
+    // Strategy: Include ALL elevation profile points for terrain detail,
+    // marking waypoint indices so we can add weather data later
 
-        // Get altitude (use waypoint altitude or default)
-        const altitude = wp.altitude ?? defaultAltitude;
+    if (elevationProfile.length > 0) {
+        // Add all elevation profile points (includes waypoints + intermediate samples)
+        elevationProfile.forEach((elevPoint) => {
+            // Convert elevation from meters to feet
+            const terrainElevation = metersToFeet(elevPoint.elevation);
 
-        // Get terrain elevation if available
-        const terrainElevation = wp.elevation;
+            // Check if this is a waypoint
+            const isWaypoint = elevPoint.waypointIndex !== undefined;
+            const wp = isWaypoint ? waypoints[elevPoint.waypointIndex!] : undefined;
+            const wx = wp ? weatherData.get(wp.id) : undefined;
 
-        // Get cloud data
-        // NOTE: Windy's cloudBase is in AGL (Above Ground Level) from ECMWF model
-        // For the altitude profile graph, we need MSL (Mean Sea Level) to plot correctly
-        // since flight altitude and terrain are in MSL
-        let cloudBase: number | undefined;
-        let cloudTop: number | undefined;
-        if (wx?.cloudBase !== undefined && wx.cloudBase !== null && !isNaN(wx.cloudBase) && wx.cloudBase > 0) {
-            // Convert from meters to feet (still AGL at this point)
-            const cloudBaseAGL = metersToFeet(wx.cloudBase);
+            // For waypoints, use the waypoint's actual altitude; for terrain samples, interpolate
+            const altitude = isWaypoint && wp
+                ? (wp.altitude ?? defaultAltitude)
+                : interpolateAltitude(elevPoint.distance, waypoints, defaultAltitude);
 
-            // Convert from AGL to MSL by adding terrain elevation
-            // This allows proper plotting on the altitude profile graph
-            const terrainMSL = terrainElevation ?? 0;
-            cloudBase = cloudBaseAGL + terrainMSL;  // Now in MSL for graph plotting
+            // For waypoints, calculate full weather data
+            let cloudBase: number | undefined;
+            let cloudTop: number | undefined;
+            let headwindComponent = 0;
+            let crosswindComponent = 0;
+            let windSpeed = 0;
+            let windDir = 0;
 
-            // Estimate cloud top if not available (also in MSL)
-            cloudTop = estimateCloudTop(cloudBase);
-        }
-
-        // Calculate wind components
-        let headwindComponent = 0;
-        let crosswindComponent = 0;
-        let windSpeed = 0;
-        let windDir = 0;
-
-        if (wx) {
-            windSpeed = wx.windSpeed;
-            windDir = wx.windDir;
-            
-            // Calculate wind components if we have a bearing (track direction)
-            // For the first waypoint, we don't have a bearing, so we'll show wind speed but no headwind component
-            if (wp.bearing !== undefined) {
-                // Use the existing headwind calculation for consistency
-                headwindComponent = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
-                // Calculate crosswind component separately
-                const trackRad = (wp.bearing * Math.PI) / 180;
-                const windRad = (wx.windDir * Math.PI) / 180;
-                crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
-            } else if (index > 0) {
-                // For waypoints without bearing, try to use the bearing from the previous waypoint
-                const prevWp = waypoints[index - 1];
-                if (prevWp.bearing !== undefined) {
-                    headwindComponent = calculateHeadwindComponent(prevWp.bearing, wx.windDir, wx.windSpeed);
-                    const trackRad = (prevWp.bearing * Math.PI) / 180;
-                    const windRad = (wx.windDir * Math.PI) / 180;
-                    crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
+            // Debug: log waypoint weather lookup
+            if (isWaypoint && wp) {
+                console.log(`[Profile Debug] Waypoint ${wp.name} (${wp.id}): wx=${wx ? 'found' : 'NOT FOUND'}, weatherData size=${weatherData.size}`);
+                if (!wx && weatherData.size > 0) {
+                    console.log(`[Profile Debug] Available keys:`, Array.from(weatherData.keys()));
                 }
             }
-        }
 
-        // Create profile point
-        const point: ProfileDataPoint = {
-            distance: cumulativeDistance,
-            altitude,
-            terrainElevation,
-            cloudBase,
-            cloudTop,
-            headwindComponent,
-            crosswindComponent,
-            windSpeed,
-            windDir,
-            waypointId: wp.id,
-            waypointName: wp.name,
-        };
+            if (isWaypoint && wx && wp) {
+                // Get cloud data
+                if (wx.cloudBase !== undefined && wx.cloudBase !== null && !isNaN(wx.cloudBase) && wx.cloudBase > 0) {
+                    const cloudBaseAGL = metersToFeet(wx.cloudBase);
+                    const terrainMSL = terrainElevation ?? 0;
+                    cloudBase = cloudBaseAGL + terrainMSL;
+                    cloudTop = estimateCloudTop(cloudBase);
+                }
 
-        // Evaluate segment condition
-        // Wind checks only apply to departure (first) and arrival (last) waypoints
-        const isTerminal = index === 0 || index === waypoints.length - 1;
-        const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal);
-        point.condition = conditionResult.condition;
-        point.conditionReasons = conditionResult.reasons;
+                // Calculate wind components
+                windSpeed = wx.windSpeed;
+                windDir = wx.windDir;
 
-        profilePoints.push(point);
+                if (wp.bearing !== undefined) {
+                    headwindComponent = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
+                    const trackRad = (wp.bearing * Math.PI) / 180;
+                    const windRad = (wx.windDir * Math.PI) / 180;
+                    crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
+                } else if (elevPoint.waypointIndex! > 0) {
+                    const prevWp = waypoints[elevPoint.waypointIndex! - 1];
+                    if (prevWp.bearing !== undefined) {
+                        headwindComponent = calculateHeadwindComponent(prevWp.bearing, wx.windDir, wx.windSpeed);
+                        const trackRad = (prevWp.bearing * Math.PI) / 180;
+                        const windRad = (wx.windDir * Math.PI) / 180;
+                        crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
+                    }
+                }
+            } else if (!isWaypoint) {
+                // Interpolate wind for terrain sample points (non-waypoints)
+                // This fills the gap between waypoints with interpolated wind data
+                const bearing = interpolateBearing(elevPoint.distance, waypoints);
+                const interpolatedWind = interpolateWindBetweenWaypoints(
+                    elevPoint.distance,
+                    waypoints,
+                    weatherData,
+                    bearing
+                );
 
-        // Add cumulative distance for next waypoint
-        if (index < waypoints.length - 1) {
-            cumulativeDistance += wp.distance || 0;
-        }
-    });
+                windSpeed = interpolatedWind.windSpeed;
+                windDir = interpolatedWind.windDir;
+                headwindComponent = interpolatedWind.headwindComponent;
+                crosswindComponent = interpolatedWind.crosswindComponent;
+            }
+
+            // Create profile point
+            const point: ProfileDataPoint = {
+                distance: elevPoint.distance,
+                altitude,
+                terrainElevation,
+                cloudBase,
+                cloudTop,
+                headwindComponent,
+                crosswindComponent,
+                windSpeed,
+                windDir,
+                verticalWinds: wx?.verticalWinds, // Pass through wind at all pressure levels
+                waypointId: wp?.id,
+                waypointName: wp?.name,
+            };
+
+            // Evaluate segment condition only for waypoints
+            if (isWaypoint && wp) {
+                const isTerminal = elevPoint.waypointIndex === 0 || elevPoint.waypointIndex === waypoints.length - 1;
+                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal);
+                point.condition = conditionResult.condition;
+                point.conditionReasons = conditionResult.reasons;
+            }
+
+            profilePoints.push(point);
+        });
+    } else {
+        // Fallback: No elevation profile, create points from waypoints only
+        let cumulativeDistance = 0;
+
+        waypoints.forEach((wp, index) => {
+            const wx = weatherData.get(wp.id);
+            const altitude = wp.altitude ?? defaultAltitude;
+            const terrainElevation = wp.elevation ? metersToFeet(wp.elevation) : undefined;
+
+            // Get cloud data
+            let cloudBase: number | undefined;
+            let cloudTop: number | undefined;
+            if (wx?.cloudBase !== undefined && wx.cloudBase !== null && !isNaN(wx.cloudBase) && wx.cloudBase > 0) {
+                const cloudBaseAGL = metersToFeet(wx.cloudBase);
+                const terrainMSL = terrainElevation ?? 0;
+                cloudBase = cloudBaseAGL + terrainMSL;
+                cloudTop = estimateCloudTop(cloudBase);
+            }
+
+            // Calculate wind components
+            let headwindComponent = 0;
+            let crosswindComponent = 0;
+            let windSpeed = 0;
+            let windDir = 0;
+
+            if (wx) {
+                windSpeed = wx.windSpeed;
+                windDir = wx.windDir;
+
+                if (wp.bearing !== undefined) {
+                    headwindComponent = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
+                    const trackRad = (wp.bearing * Math.PI) / 180;
+                    const windRad = (wx.windDir * Math.PI) / 180;
+                    crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
+                } else if (index > 0) {
+                    const prevWp = waypoints[index - 1];
+                    if (prevWp.bearing !== undefined) {
+                        headwindComponent = calculateHeadwindComponent(prevWp.bearing, wx.windDir, wx.windSpeed);
+                        const trackRad = (prevWp.bearing * Math.PI) / 180;
+                        const windRad = (wx.windDir * Math.PI) / 180;
+                        crosswindComponent = wx.windSpeed * Math.sin(trackRad - windRad);
+                    }
+                }
+            }
+
+            const point: ProfileDataPoint = {
+                distance: cumulativeDistance,
+                altitude,
+                terrainElevation,
+                cloudBase,
+                cloudTop,
+                headwindComponent,
+                crosswindComponent,
+                windSpeed,
+                windDir,
+                verticalWinds: wx?.verticalWinds, // Pass through wind at all pressure levels
+                waypointId: wp.id,
+                waypointName: wp.name,
+            };
+
+            const isTerminal = index === 0 || index === waypoints.length - 1;
+            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal);
+            point.condition = conditionResult.condition;
+            point.conditionReasons = conditionResult.reasons;
+
+            profilePoints.push(point);
+
+            if (index < waypoints.length - 1) {
+                cumulativeDistance += wp.distance || 0;
+            }
+        });
+    }
 
     return profilePoints;
 }
