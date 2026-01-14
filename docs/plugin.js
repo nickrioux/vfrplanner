@@ -13,8 +13,8 @@ const __pluginConfig =  {
   "private": true,
   "addToContextmenu": true,
   "listenToSingleclick": true,
-  "built": 1768351950912,
-  "builtReadable": "2026-01-14T00:52:30.912Z",
+  "built": 1768355326921,
+  "builtReadable": "2026-01-14T01:48:46.921Z",
   "screenshot": "screenshot.jpg"
 };
 
@@ -5614,7 +5614,7 @@ async function getForecastTimeRange(lat, lon) {
     defaultAltitude: 3000,
     showLabels: false,
     allowDrag: true,
-    enableLogging: true,
+    enableLogging: false,
     terrainSampleInterval: 5,
     distanceUnit: 'nm',
     altitudeUnit: 'ft',
