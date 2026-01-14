@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAltitude: 3000,
     showLabels: false,
     allowDrag: true,
-    enableLogging: true,
+    enableLogging: false,
     terrainSampleInterval: 5, // Sample every 5 NM by default
     distanceUnit: 'nm',
     altitudeUnit: 'ft',
