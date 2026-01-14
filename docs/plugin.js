@@ -1,11 +1,11 @@
 const __pluginConfig =  {
   "name": "windy-plugin-vfr-planner",
-  "version": "0.1.0",
+  "version": "0.8.0",
   "icon": "✈️",
   "title": "VFR Flight Planner",
   "description": "VFR flight planning with ForeFlight import support",
   "author": "Nicolas",
-  "repository": "https://github.com/nrioux/windy-plugin-vfr-planner",
+  "repository": "https://github.com/nickrioux/vfrplanner",
   "desktopUI": "rhpane",
   "mobileUI": "fullscreen",
   "desktopWidth": 400,
@@ -13,8 +13,8 @@ const __pluginConfig =  {
   "private": true,
   "addToContextmenu": true,
   "listenToSingleclick": true,
-  "built": 1768355326921,
-  "builtReadable": "2026-01-14T01:48:46.921Z",
+  "built": 1768355762024,
+  "builtReadable": "2026-01-14T01:56:02.024Z",
   "screenshot": "screenshot.jpg"
 };
 
