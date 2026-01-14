@@ -195,7 +195,7 @@
                                 {/if}
                                 {#if wx}
                                     <div class="wp-weather">
-                                        <span class="wx-wind" title={wx.windAltitude ? `Wind at ${Math.round(wx.windAltitude)}ft` : 'Wind'}>💨 {formatWind(wx.windSpeed, wx.windDir, wx.windAltitude)}</span>
+                                        <span class="wx-wind" title={wx.windAltitude ? `Wind at ${Math.round(wx.windAltitude)}ft (${wx.windLevel || 'surface'})` : 'Surface wind'}>💨 {formatWind(wx.windSpeed, wx.windDir, wx.windAltitude)}{#if wx.windLevel && wx.windLevel !== 'surface'} <small style="opacity: 0.7;">({wx.windLevel})</small>{/if}</span>
                                         <span class="wx-temp" title="Temperature">🌡️ {formatTemperature(wx.temperature)}</span>
                                         <span
                                             class="wx-cloud"
@@ -224,11 +224,25 @@
                                     <div class="wp-distance">DEP</div>
                                 {/if}
                             </div>
-                            <button
-                                class="btn-delete"
-                                on:click|stopPropagation={() => deleteWaypoint(wp.id)}
-                                title="Delete waypoint"
-                            >🗑</button>
+                            <div class="wp-actions">
+                                <button
+                                    class="btn-move"
+                                    on:click|stopPropagation={() => moveWaypointUp(wp.id)}
+                                    title="Move up"
+                                    disabled={index === 0}
+                                >▲</button>
+                                <button
+                                    class="btn-move"
+                                    on:click|stopPropagation={() => moveWaypointDown(wp.id)}
+                                    title="Move down"
+                                    disabled={index === flightPlan.waypoints.length - 1}
+                                >▼</button>
+                                <button
+                                    class="btn-delete"
+                                    on:click|stopPropagation={() => deleteWaypoint(wp.id)}
+                                    title="Delete waypoint"
+                                >🗑</button>
+                            </div>
                         </div>
                         {#if alerts.length > 0}
                             <div class="alert-row">
@@ -255,6 +269,7 @@
             <AltitudeProfile
                 {flightPlan}
                 {weatherData}
+                {elevationProfile}
                 {settings}
                 maxAltitude={maxProfileAltitude}
                 scale={profileScale}
@@ -318,6 +333,42 @@
             </div>
 
             <div class="setting-group">
+                <label class="setting-label">Terrain Sample Interval</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        bind:value={settings.terrainSampleInterval}
+                        on:change={handleSettingsChange}
+                        min="1"
+                        max="10"
+                        step="0.5"
+                    />
+                    <span class="unit">NM</span>
+                </div>
+                <div class="setting-description">
+                    Distance between terrain elevation samples. Lower = more detail, but slower.
+                    <br/>Current: {settings.terrainSampleInterval} NM interval will fetch ~{Math.ceil((flightPlan.totals.distance || 0) / settings.terrainSampleInterval) + flightPlan.waypoints.length} elevation points
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-label">Profile Top Height</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        bind:value={maxProfileAltitude}
+                        min="1000"
+                        max="60000"
+                        step="1000"
+                    />
+                    <span class="unit">ft MSL</span>
+                </div>
+                <div class="setting-description">
+                    Maximum altitude displayed on the altitude profile graph.
+                </div>
+            </div>
+
+            <div class="setting-group">
                 <label class="setting-checkbox">
                     <input
                         type="checkbox"
@@ -340,7 +391,7 @@
     import { map } from '@windy/map';
     import { singleclick } from '@windy/singleclick';
     import store from '@windy/store';
-    import { onDestroy, onMount } from 'svelte';
+    import { onDestroy, onMount, tick } from 'svelte';
 
     import config from './pluginConfig';
     import { readFPLFile, convertToFlightPlan, validateFPL } from './parsers/fplParser';
@@ -359,6 +410,7 @@
         type ForecastTimeRange,
     } from './services/weatherService';
     import { calculateProfileData, type SegmentCondition } from './services/profileService';
+    import { fetchRouteElevationProfile, type ElevationPoint } from './services/elevationService';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings } from './types';
     import { DEFAULT_SETTINGS } from './types';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
@@ -385,6 +437,9 @@
     let weatherAlerts: Map<string, WeatherAlert[]> = new Map();
     let isLoadingWeather = false;
     let weatherError: string | null = null;
+
+    // Elevation profile state
+    let elevationProfile: ElevationPoint[] = [];
 
     // Departure time state
     let departureTime: number = Date.now();
@@ -548,6 +603,141 @@
             // Switch to route tab to show the selected waypoint
             activeTab = 'route';
         }
+    }
+
+    async function insertWaypointOnSegment(segmentIndex: number, lat: number, lon: number) {
+        if (!flightPlan) return;
+
+        // Create a new waypoint at the clicked position with default altitude
+        const newWaypoint: Waypoint = {
+            id: `wp_${Date.now()}`,
+            name: `WP${flightPlan.waypoints.length + 1}`,
+            type: 'user',
+            lat,
+            lon,
+            altitude: flightPlan.aircraft.defaultAltitude,
+        };
+
+        // Insert the waypoint after the segment's starting waypoint
+        const newWaypoints = [
+            ...flightPlan.waypoints.slice(0, segmentIndex + 1),
+            newWaypoint,
+            ...flightPlan.waypoints.slice(segmentIndex + 1)
+        ];
+
+        // Recalculate navigation
+        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: navResult.waypoints,
+            totals: navResult.totals,
+        };
+
+        // Wait for Svelte's reactivity to complete
+        await tick();
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Inserted waypoint:', newWaypoint.name, 'at', segmentIndex + 1, 'Total waypoints:', flightPlan.waypoints.length);
+        }
+
+        // Use requestAnimationFrame to ensure map updates after browser paint
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+        }
+        requestAnimationFrame(() => {
+            if (settings.enableLogging) {
+                console.log('[VFR Planner] requestAnimationFrame callback executing');
+            }
+            updateMapLayers();
+        });
+
+        saveSession();
+
+        // Select the newly inserted waypoint
+        selectedWaypointId = newWaypoint.id;
+    }
+
+    async function moveWaypointUp(waypointId: string) {
+        if (!flightPlan) return;
+
+        const index = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
+        if (index <= 0) return; // Already at top or not found
+
+        const newWaypoints = [...flightPlan.waypoints];
+        const temp = newWaypoints[index - 1];
+        newWaypoints[index - 1] = newWaypoints[index];
+        newWaypoints[index] = temp;
+
+        // Recalculate navigation
+        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: navResult.waypoints,
+            totals: navResult.totals,
+        };
+
+        // Wait for Svelte's reactivity to complete
+        await tick();
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Moved waypoint up:', newWaypoints[index - 1].name);
+        }
+
+        // Use requestAnimationFrame to ensure map updates after browser paint
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+        }
+        requestAnimationFrame(() => {
+            if (settings.enableLogging) {
+                console.log('[VFR Planner] requestAnimationFrame callback executing');
+            }
+            updateMapLayers();
+        });
+
+        saveSession();
+    }
+
+    async function moveWaypointDown(waypointId: string) {
+        if (!flightPlan) return;
+
+        const index = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
+        if (index < 0 || index >= flightPlan.waypoints.length - 1) return; // Already at bottom or not found
+
+        const newWaypoints = [...flightPlan.waypoints];
+        const temp = newWaypoints[index];
+        newWaypoints[index] = newWaypoints[index + 1];
+        newWaypoints[index + 1] = temp;
+
+        // Recalculate navigation
+        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: navResult.waypoints,
+            totals: navResult.totals,
+        };
+
+        // Wait for Svelte's reactivity to complete
+        await tick();
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Moved waypoint down:', newWaypoints[index + 1].name);
+        }
+
+        // Use requestAnimationFrame to ensure map updates after browser paint
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+        }
+        requestAnimationFrame(() => {
+            if (settings.enableLogging) {
+                console.log('[VFR Planner] requestAnimationFrame callback executing');
+            }
+            updateMapLayers();
+        });
+
+        saveSession();
     }
 
     function deleteWaypoint(waypointId: string) {
@@ -770,6 +960,24 @@
 
             weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
 
+            console.log(`[VFR Debug] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
+            if (weatherData.size > 0) {
+                console.log(`[VFR Debug] Weather data keys:`, Array.from(weatherData.keys()));
+                // Log detailed weather for each waypoint
+                weatherData.forEach((wx, waypointId) => {
+                    const wp = flightPlan?.waypoints.find(w => w.id === waypointId);
+                    console.log(`[VFR Debug] Weather for ${wp?.name || waypointId}:`, {
+                        wind: `${Math.round(wx.windDir)}° @ ${Math.round(wx.windSpeed)} kt`,
+                        gust: wx.windGust ? `${Math.round(wx.windGust)} kt` : 'none',
+                        temp: `${Math.round(wx.temperature)}°C`,
+                        cloudBase: wx.cloudBase ? `${Math.round(wx.cloudBase)}m AGL` : 'clear',
+                        visibility: wx.visibility ? `${wx.visibility.toFixed(1)} km` : 'N/A',
+                        pressure: wx.pressure ? `${Math.round(wx.pressure)} hPa` : 'N/A',
+                        windAltitude: wx.windAltitude ? `${wx.windAltitude} ft` : 'surface'
+                    });
+                });
+            }
+
             // Check for alerts at each waypoint
             weatherAlerts = new Map();
             weatherData.forEach((wx, waypointId) => {
@@ -778,6 +986,24 @@
                     weatherAlerts.set(waypointId, alerts);
                 }
             });
+
+            // Fetch terrain elevation profile along the route
+            try {
+                if (settings.enableLogging) {
+                    console.log(`[VFR Planner] Fetching terrain elevation profile from Open-Meteo (sampling every ${settings.terrainSampleInterval} NM)...`);
+                }
+                elevationProfile = await fetchRouteElevationProfile(
+                    flightPlan.waypoints,
+                    settings.terrainSampleInterval,
+                    settings.enableLogging
+                );
+                if (settings.enableLogging) {
+                    console.log(`[VFR Planner] Terrain profile: ${elevationProfile.length} elevation points`);
+                }
+            } catch (elevError) {
+                console.error('[VFR Planner] Error fetching elevation profile:', elevError);
+                elevationProfile = []; // Continue without terrain data
+            }
 
             // Recalculate navigation with wind corrections
             recalculateWithWind();
@@ -967,7 +1193,16 @@
 
     // Map layer management
     function updateMapLayers() {
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] updateMapLayers called, waypoints:', flightPlan?.waypoints.length);
+            console.log('[VFR Planner] routeLayer exists:', !!routeLayer, 'waypointMarkers exists:', !!waypointMarkers);
+        }
+
         clearMapLayers();
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] After clearMapLayers: routeLayer:', !!routeLayer, 'waypointMarkers:', !!waypointMarkers);
+        }
 
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
 
@@ -975,7 +1210,8 @@
         const profileData = calculateProfileData(
             flightPlan.waypoints,
             weatherData,
-            flightPlan.aircraft.defaultAltitude
+            flightPlan.aircraft.defaultAltitude,
+            elevationProfile
         );
 
         // Create route with color-coded segments
@@ -1000,10 +1236,33 @@
                 opacity: 0.8,
             });
 
+            // Add click handler to insert waypoint on this segment
+            segment.on('click', (e: L.LeafletMouseEvent) => {
+                if (settings.allowDrag) {
+                    L.DomEvent.stopPropagation(e);
+                    insertWaypointOnSegment(i, e.latlng.lat, e.latlng.lng);
+                }
+            });
+
+            // Change cursor when hovering if dragging is enabled
+            segment.on('mouseover', () => {
+                if (settings.allowDrag) {
+                    map.getContainer().style.cursor = 'crosshair';
+                }
+            });
+
+            segment.on('mouseout', () => {
+                map.getContainer().style.cursor = '';
+            });
+
             routeLayer.addLayer(segment);
         }
 
         map.addLayer(routeLayer);
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Added routeLayer to map with', flightPlan.waypoints.length - 1, 'segments');
+        }
 
         // Create waypoint markers
         waypointMarkers = new L.LayerGroup();
@@ -1052,14 +1311,51 @@
             // Build tooltip content with weather and condition info
             let tooltipContent = `<b>${index + 1}. ${wp.name}</b>${wp.comment ? `<br/><i>${wp.comment}</i>` : ''}`;
 
+            // Add altitude information
+            const altitude = wp.altitude ?? flightPlan.aircraft.defaultAltitude;
+            tooltipContent += '<br/><div style="margin-top: 2px; font-size: 11px;">';
+            tooltipContent += `✈️ Altitude: ${Math.round(altitude)} ft MSL`;
+
+            // Add terrain elevation if available
+            const pointData = profileData[index];
+            if (pointData?.terrainElevation !== undefined) {
+                const clearance = altitude - pointData.terrainElevation;
+                tooltipContent += ` | ⛰️ Terrain: ${Math.round(pointData.terrainElevation)} ft`;
+                tooltipContent += ` (${clearance >= 0 ? '+' : ''}${Math.round(clearance)} ft)`;
+            }
+            tooltipContent += '</div>';
+
             // Add weather data if available (matching Route Panel display)
             const wx = getWaypointWeather(wp.id);
             if (wx) {
                 tooltipContent += '<br/><div style="margin-top: 4px;">';
                 tooltipContent += `💨 ${formatWind(wx.windSpeed, wx.windDir, wx.windAltitude)}`;
+                if (wx.windLevel && wx.windLevel !== 'surface') {
+                    tooltipContent += ` <span style="font-size: 9px; color: #888;">(${wx.windLevel})</span>`;
+                }
                 tooltipContent += ` | 🌡️ ${formatTemperature(wx.temperature)}`;
                 tooltipContent += ` | ☁️ ${wx.cloudBaseDisplay ?? 'N/A'}`;
                 tooltipContent += '</div>';
+
+                // Add vertical wind profile if available
+                if (wx.verticalWinds && wx.verticalWinds.length > 0) {
+                    tooltipContent += '<div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #444; font-size: 10px;">';
+                    tooltipContent += '<b>📊 Winds Aloft:</b><br/>';
+                    tooltipContent += '<table style="font-size: 10px; line-height: 1.3; margin-top: 2px;">';
+                    // Show winds from highest to lowest altitude
+                    const sortedWinds = [...wx.verticalWinds].sort((a, b) => b.altitudeFeet - a.altitudeFeet);
+                    sortedWinds.forEach(w => {
+                        const isCurrentLevel = wx.windLevel?.includes(w.level);
+                        const highlight = isCurrentLevel ? ' style="color: #4CAF50; font-weight: bold;"' : '';
+                        tooltipContent += `<tr${highlight}>`;
+                        tooltipContent += `<td style="padding-right: 8px;">${w.level}</td>`;
+                        tooltipContent += `<td style="padding-right: 4px; text-align: right;">${Math.round(w.altitudeFeet).toLocaleString()}ft</td>`;
+                        tooltipContent += `<td style="text-align: right;">${String(Math.round(w.windDir)).padStart(3, '0')}°/${Math.round(w.windSpeed)}kt</td>`;
+                        tooltipContent += '</tr>';
+                    });
+                    tooltipContent += '</table>';
+                    tooltipContent += '</div>';
+                }
             }
 
             // Add navigation data if not departure
@@ -1073,7 +1369,6 @@
             }
 
             // Add condition information if available
-            const pointData = profileData[index];
             if (pointData?.condition) {
                 const conditionColor = getSegmentColor(pointData.condition);
                 tooltipContent += `<br/><span style="color: ${conditionColor}; font-weight: bold; margin-top: 4px; display: inline-block;">Conditions: ${pointData.condition.toUpperCase()}</span>`;
@@ -1099,7 +1394,16 @@
             waypointMarkers?.addLayer(marker);
         });
 
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Created', flightPlan.waypoints.length, 'waypoint markers');
+        }
+
         map.addLayer(waypointMarkers);
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Added waypointMarkers layer to map');
+            console.log('[VFR Planner] Map has', map.getLayers ? map.getLayers().length : 'unknown', 'layers');
+        }
     }
 
     function clearMapLayers() {
@@ -1548,7 +1852,7 @@
         &:hover {
             background: rgba(255, 255, 255, 0.05);
 
-            .btn-delete {
+            .btn-move, .btn-delete {
                 opacity: 1;
             }
         }
@@ -1678,6 +1982,34 @@
         font-weight: 500;
     }
 
+    .wp-actions {
+        display: flex;
+        gap: 2px;
+        align-items: center;
+    }
+
+    .btn-move {
+        padding: 2px 6px;
+        background: transparent;
+        border: none;
+        color: rgba(255, 255, 255, 0.3);
+        cursor: pointer;
+        opacity: 0;
+        transition: all 0.15s ease;
+        font-size: 10px;
+        line-height: 1;
+
+        &:hover:not(:disabled) {
+            color: #3498db;
+            background: rgba(52, 152, 219, 0.1);
+        }
+
+        &:disabled {
+            opacity: 0.2;
+            cursor: not-allowed;
+        }
+    }
+
     .btn-delete {
         padding: 4px 6px;
         background: transparent;
@@ -1747,6 +2079,13 @@
             height: 16px;
             cursor: pointer;
         }
+    }
+
+    .setting-description {
+        margin-top: 6px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.5);
+        line-height: 1.4;
     }
 
     .setting-info {

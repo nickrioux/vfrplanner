@@ -1,12 +1,15 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
     import type { FlightPlan } from '../types/flightPlan';
-    import type { WaypointWeather } from '../services/weatherService';
+    import type { WaypointWeather, LevelWind } from '../services/weatherService';
     import type { PluginSettings } from '../types';
     import { calculateProfileData, type ProfileDataPoint, type SegmentCondition } from '../services/profileService';
+    import type { ElevationPoint } from '../services/elevationService';
+    import { lerpAngle } from '../utils/interpolation';
 
     export let flightPlan: FlightPlan;
     export let weatherData: Map<string, WaypointWeather>;
+    export let elevationProfile: ElevationPoint[] = [];
     export let settings: PluginSettings;
     export let maxAltitude: number = 15000;
     export let scale: number = 511; // meters per pixel;
@@ -25,8 +28,15 @@
     let cursorDistance: number | null = null;
     let cursorData: ProfileDataPoint | null = null;
 
-    // Calculate profile data
-    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude);
+    // Calculate profile data - includes all terrain samples + waypoints
+    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude, elevationProfile);
+
+    // Extract only waypoint data for flight path and wind display
+    $: waypointProfileData = profileData.filter(p => p.waypointId !== undefined);
+
+    // Create a reactive key that changes when scale parameters change
+    // This forces re-rendering of all altitude-dependent elements
+    $: scaleKey = `${maxAltitude}-${graphHeight}`;
 
     /**
      * Get segment color based on condition
@@ -42,6 +52,205 @@
             case 'unknown':
             default:
                 return '#757575'; // Gray
+        }
+    }
+
+    /**
+     * Generate aviation wind barb symbol
+     * @param x - Center X position
+     * @param y - Center Y position (top of flight path marker)
+     * @param windDir - Wind direction in degrees (where wind comes FROM)
+     * @param windSpeed - Wind speed in knots
+     * @returns SVG group element content
+     */
+    function generateWindBarb(x: number, y: number, windDir: number, windSpeed: number): {
+        staff: string;
+        barbs: Array<{ path: string; type: string }>;
+    } {
+        const staffLength = 30;
+        const barbLength = 10;
+        const shortBarbLength = 5;
+        const triangleSize = 8;
+
+        // Convert wind direction to radians (wind comes FROM this direction)
+        const angle = (windDir - 90) * Math.PI / 180; // -90 to adjust for SVG coordinate system
+
+        // Calculate staff end point
+        const staffEndX = x + Math.cos(angle) * staffLength;
+        const staffEndY = y + Math.sin(angle) * staffLength;
+
+        // Staff line
+        const staff = `M ${x},${y} L ${staffEndX},${staffEndY}`;
+
+        // Calculate barbs (perpendicular to staff, on the right side)
+        const barbs: Array<{ path: string; type: string }> = [];
+        let remainingSpeed = Math.round(windSpeed);
+        let barbPosition = 0;
+        const barbSpacing = 6;
+
+        // Add 50-knot pennants (triangles)
+        while (remainingSpeed >= 50) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            // Triangle vertices
+            const perpAngle = angle + Math.PI / 2; // Perpendicular to staff
+            const tip1X = posX + Math.cos(perpAngle) * triangleSize;
+            const tip1Y = posY + Math.sin(perpAngle) * triangleSize;
+            const tip2X = posX + Math.cos(angle) * triangleSize;
+            const tip2Y = posY + Math.sin(angle) * triangleSize;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${tip1X},${tip1Y} L ${tip2X},${tip2Y} Z`,
+                type: 'triangle'
+            });
+
+            remainingSpeed -= 50;
+            barbPosition += barbSpacing * 1.5; // Extra space for triangles
+        }
+
+        // Add 10-knot barbs (long lines)
+        while (remainingSpeed >= 10) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            const perpAngle = angle + Math.PI / 2;
+            const barbEndX = posX + Math.cos(perpAngle) * barbLength;
+            const barbEndY = posY + Math.sin(perpAngle) * barbLength;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
+                type: 'long'
+            });
+
+            remainingSpeed -= 10;
+            barbPosition += barbSpacing;
+        }
+
+        // Add 5-knot barbs (short lines)
+        if (remainingSpeed >= 5) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            const perpAngle = angle + Math.PI / 2;
+            const barbEndX = posX + Math.cos(perpAngle) * shortBarbLength;
+            const barbEndY = posY + Math.sin(perpAngle) * shortBarbLength;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
+                type: 'short'
+            });
+        }
+
+        // If wind speed is less than 5 knots, just show circle at center
+        if (windSpeed < 3) {
+            return { staff: '', barbs: [] };
+        }
+
+        return { staff, barbs };
+    }
+
+    /**
+     * Generate a smaller wind barb for vertical wind display
+     * Similar to generateWindBarb but scaled down
+     */
+    function generateSmallWindBarb(x: number, y: number, windDir: number, windSpeed: number, scale: number = 0.6): {
+        staff: string;
+        barbs: Array<{ path: string; type: string }>;
+    } {
+        const staffLength = 20 * scale;
+        const barbLength = 8 * scale;
+        const shortBarbLength = 4 * scale;
+        const triangleSize = 6 * scale;
+
+        // Convert wind direction to radians (wind comes FROM this direction)
+        const angle = (windDir - 90) * Math.PI / 180;
+
+        // Calculate staff end point
+        const staffEndX = x + Math.cos(angle) * staffLength;
+        const staffEndY = y + Math.sin(angle) * staffLength;
+
+        // Staff line
+        const staff = `M ${x},${y} L ${staffEndX},${staffEndY}`;
+
+        // Calculate barbs
+        const barbs: Array<{ path: string; type: string }> = [];
+        let remainingSpeed = Math.round(windSpeed);
+        let barbPosition = 0;
+        const barbSpacing = 4 * scale;
+
+        // Add 50-knot pennants (triangles)
+        while (remainingSpeed >= 50) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            const perpAngle = angle + Math.PI / 2;
+            const tip1X = posX + Math.cos(perpAngle) * triangleSize;
+            const tip1Y = posY + Math.sin(perpAngle) * triangleSize;
+            const tip2X = posX + Math.cos(angle) * triangleSize;
+            const tip2Y = posY + Math.sin(angle) * triangleSize;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${tip1X},${tip1Y} L ${tip2X},${tip2Y} Z`,
+                type: 'triangle'
+            });
+
+            remainingSpeed -= 50;
+            barbPosition += barbSpacing * 1.5;
+        }
+
+        // Add 10-knot barbs (long lines)
+        while (remainingSpeed >= 10) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            const perpAngle = angle + Math.PI / 2;
+            const barbEndX = posX + Math.cos(perpAngle) * barbLength;
+            const barbEndY = posY + Math.sin(perpAngle) * barbLength;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
+                type: 'long'
+            });
+
+            remainingSpeed -= 10;
+            barbPosition += barbSpacing;
+        }
+
+        // Add 5-knot barbs (short lines)
+        if (remainingSpeed >= 5) {
+            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
+            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
+
+            const perpAngle = angle + Math.PI / 2;
+            const barbEndX = posX + Math.cos(perpAngle) * shortBarbLength;
+            const barbEndY = posY + Math.sin(perpAngle) * shortBarbLength;
+
+            barbs.push({
+                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
+                type: 'short'
+            });
+        }
+
+        if (windSpeed < 3) {
+            return { staff: '', barbs: [] };
+        }
+
+        return { staff, barbs };
+    }
+
+    /**
+     * Get color for wind level based on whether it's the flight altitude level
+     */
+    function getWindLevelColor(levelAltitude: number, flightAltitude: number): string {
+        // Highlight the wind level closest to flight altitude
+        const diff = Math.abs(levelAltitude - flightAltitude);
+        if (diff < 500) {
+            return 'rgba(76, 175, 80, 0.95)'; // Green for current flight level
+        } else if (diff < 2000) {
+            return 'rgba(255, 193, 7, 0.8)'; // Yellow for nearby levels
+        } else {
+            return 'rgba(255, 255, 255, 0.5)'; // White/gray for distant levels
         }
     }
 
@@ -70,7 +279,10 @@
 
             if (distance >= p1.distance && distance <= p2.distance) {
                 const t = (distance - p1.distance) / (p2.distance - p1.distance);
-                
+
+                // For vertical winds, use the nearest waypoint's data (can't easily interpolate wind arrays)
+                const nearestVerticalWinds = t < 0.5 ? p1.verticalWinds : p2.verticalWinds;
+
                 return {
                     distance,
                     altitude: p1.altitude + (p2.altitude - p1.altitude) * t,
@@ -86,7 +298,8 @@
                     headwindComponent: p1.headwindComponent + (p2.headwindComponent - p1.headwindComponent) * t,
                     crosswindComponent: p1.crosswindComponent + (p2.crosswindComponent - p1.crosswindComponent) * t,
                     windSpeed: p1.windSpeed + (p2.windSpeed - p1.windSpeed) * t,
-                    windDir: p1.windDir + (p2.windDir - p1.windDir) * t,
+                    windDir: lerpAngle(p1.windDir, p2.windDir, t), // Use angular interpolation for proper wrap-around
+                    verticalWinds: nearestVerticalWinds,
                     condition: p1.condition, // Use starting point's condition
                     conditionReasons: p1.conditionReasons, // Use starting point's reasons
                 };
@@ -177,14 +390,43 @@
         return lines;
     })();
 
-    // Generate terrain path
+    // Generate terrain filled area (polygon from ground to terrain elevation)
     $: terrainPath = (() => {
-        if (profileData.length === 0) return '';
-        const points = profileData
-            .filter(p => p.terrainElevation !== undefined)
-            .map(p => `${distanceToX(p.distance)},${altitudeToY(p.terrainElevation!)}`);
-        if (points.length === 0) return '';
-        return `M ${points.join(' L ')}`;
+        // Explicitly depend on maxAltitude to recalculate when scale changes
+        const currentMaxAltitude = maxAltitude;
+
+        if (profileData.length === 0) {
+            if (settings.enableLogging) console.log('[Profile] No profile data for terrain');
+            return '';
+        }
+        const terrainPoints = profileData.filter(p => p.terrainElevation !== undefined);
+        if (terrainPoints.length === 0) {
+            if (settings.enableLogging) console.log('[Profile] No terrain elevation data in profile points');
+            return '';
+        }
+
+        // Start from bottom-left
+        const bottomY = graphHeight - graphPadding.bottom;
+        const points: string[] = [];
+
+        // Bottom-left corner
+        points.push(`${distanceToX(terrainPoints[0].distance)},${bottomY}`);
+
+        // Terrain elevation points (left to right)
+        terrainPoints.forEach(p => {
+            points.push(`${distanceToX(p.distance)},${altitudeToY(p.terrainElevation!)}`);
+        });
+
+        // Bottom-right corner to close the polygon
+        points.push(`${distanceToX(terrainPoints[terrainPoints.length - 1].distance)},${bottomY}`);
+
+        const path = points.join(' ');
+        if (settings.enableLogging) {
+            console.log(`[Profile] Terrain path generated: ${terrainPoints.length} points`);
+            console.log(`[Profile] Terrain elevation range: ${Math.min(...terrainPoints.map(p => p.terrainElevation!))}ft to ${Math.max(...terrainPoints.map(p => p.terrainElevation!))}ft`);
+            console.log(`[Profile] First 3 terrain points:`, terrainPoints.slice(0, 3).map(p => `${p.distance.toFixed(1)}NM @ ${p.terrainElevation!.toFixed(0)}ft`));
+        }
+        return path;
     })();
 </script>
 
@@ -197,9 +439,10 @@
     <!-- Debug info (can be removed later) -->
     {#if settings.enableLogging}
         <div class="debug-info" style="font-size: 10px; color: rgba(255,255,255,0.5); padding: 4px;">
-            Points: {profileData.length} |
-            With clouds: {profileData.filter(p => p.cloudBase !== undefined).length} |
-            With wind: {profileData.filter(p => p.windSpeed > 0).length}
+            Waypoints: {waypointProfileData.length} |
+            Terrain samples: {profileData.filter(p => p.terrainElevation !== undefined).length} |
+            Clouds: {waypointProfileData.filter(p => p.cloudBase !== undefined).length} |
+            Wind: {waypointProfileData.filter(p => p.windSpeed > 0).length}
         </div>
     {/if}
 
@@ -225,38 +468,68 @@
 
     <!-- Cursor info display -->
     <div class="cursor-info">
-        {#if cursorData}
-            <div class="cursor-main-info">
-                Altitude: {Math.round(cursorData.altitude)}ft
-                {#if cursorData.terrainElevation !== undefined}
-                    | Terrain: {Math.round(cursorData.terrainElevation)}ft
+        <!-- Waypoint info section - 3 fixed lines -->
+        <div class="cursor-waypoint-info">
+            <div class="cursor-row">
+                {#if cursorData}
+                    Altitude: {Math.round(cursorData.altitude)}ft | Terrain: {cursorData.terrainElevation !== undefined ? Math.round(cursorData.terrainElevation) + 'ft' : '--'} | Distance: {cursorData.distance.toFixed(1)}NM
+                {:else}
+                    Altitude: -- | Terrain: -- | Distance: --
                 {/if}
-                | Distance: {cursorData.distance.toFixed(1)}NM
-                {#if cursorData.windSpeed > 0}
-                    | Wind: {cursorData.windSpeed.toFixed(0)}kt @ {Math.round(cursorData.windDir)}°
+            </div>
+            <div class="cursor-row">
+                {#if cursorData && cursorData.windSpeed > 0}
+                    Wind: {cursorData.windSpeed.toFixed(0)}kt @ {Math.round(cursorData.windDir)}°
                     {#if cursorData.headwindComponent !== 0}
                         ({cursorData.headwindComponent > 0 ? 'HW' : 'TW'} {Math.abs(cursorData.headwindComponent).toFixed(0)}kt)
                     {/if}
+                {:else}
+                    Wind: --
                 {/if}
-                {#if cursorData.cloudBase !== undefined}
+                {#if cursorData?.cloudBase !== undefined}
                     | Cloud: {Math.round(cursorData.cloudBase)}-{Math.round(cursorData.cloudTop || 0)}ft
+                {:else}
+                    | Cloud: --
                 {/if}
             </div>
-            {#if cursorData.condition}
-                <div class="cursor-condition" style="color: {getSegmentColor(cursorData.condition)}; font-weight: bold; margin-top: 4px;">
+            <div class="cursor-row cursor-condition" style="color: {cursorData?.condition ? getSegmentColor(cursorData.condition) : 'rgba(255,255,255,0.4)'};">
+                {#if cursorData?.condition}
                     Conditions: {cursorData.condition.toUpperCase()}
-                </div>
-            {/if}
-            {#if cursorData.conditionReasons && cursorData.conditionReasons.length > 0}
-                <div class="cursor-condition-reasons" style="font-size: 10px; color: rgba(255, 255, 255, 0.7); margin-top: 4px;">
-                    {#each cursorData.conditionReasons as reason}
-                        <div>⚠️ {reason}</div>
+                {:else}
+                    Conditions: --
+                {/if}
+            </div>
+        </div>
+        <!-- Winds aloft section - 2 fixed lines -->
+        <div class="cursor-winds-section">
+            <div class="cursor-row winds-row">
+                <span class="vertical-winds-label">Winds Aloft:</span>
+                {#if cursorData?.verticalWinds && cursorData.verticalWinds.length > 0}
+                    {@const filteredWinds = cursorData.verticalWinds.filter(w => w.altitudeFeet <= maxAltitude).sort((a, b) => b.altitudeFeet - a.altitudeFeet)}
+                    {#each filteredWinds.slice(0, 4) as wind}
+                        {@const isFlightLevel = cursorData && Math.abs(wind.altitudeFeet - cursorData.altitude) < 500}
+                        <span class="wind-level" class:flight-level={isFlightLevel}>
+                            {Math.round(wind.altitudeFeet/1000)}k:{String(Math.round(wind.windDir)).padStart(3, '0')}°/{Math.round(wind.windSpeed)}kt
+                        </span>
                     {/each}
-                </div>
-            {/if}
-        {:else}
-            Hover over graph to see details
-        {/if}
+                {:else}
+                    <span class="wind-level-empty">No data</span>
+                {/if}
+            </div>
+            <div class="cursor-row winds-row">
+                {#if cursorData?.verticalWinds && cursorData.verticalWinds.length > 0}
+                    {@const filteredWinds = cursorData.verticalWinds.filter(w => w.altitudeFeet <= maxAltitude).sort((a, b) => b.altitudeFeet - a.altitudeFeet)}
+                    {#if filteredWinds.length > 4}
+                        {#each filteredWinds.slice(4, 8) as wind}
+                            {@const isFlightLevel = cursorData && Math.abs(wind.altitudeFeet - cursorData.altitude) < 500}
+                            <span class="wind-level" class:flight-level={isFlightLevel}>
+                                {Math.round(wind.altitudeFeet/1000)}k:{String(Math.round(wind.windDir)).padStart(3, '0')}°/{Math.round(wind.windSpeed)}kt
+                            </span>
+                        {/each}
+                    {/if}
+                {/if}
+            </div>
+        </div>
     </div>
 
     <!-- Graph SVG -->
@@ -270,6 +543,17 @@
             on:mousemove={handleMouseMove}
             on:mouseleave={handleMouseLeave}
         >
+            <!-- SVG Definitions -->
+            <defs>
+                <linearGradient id="terrainGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" style="stop-color:#d4a574;stop-opacity:1" />
+                    <stop offset="40%" style="stop-color:#a67c52;stop-opacity:1" />
+                    <stop offset="100%" style="stop-color:#6b4423;stop-opacity:1" />
+                </linearGradient>
+            </defs>
+
+            <!-- Force re-render when scale changes -->
+            {#key scaleKey}
             <!-- Grid lines -->
             {#each altitudeGridLines as line}
                 <line
@@ -307,10 +591,10 @@
                 >{line.label}</text>
             {/each}
 
-            <!-- Cloud areas -->
-            {#each profileData as point, index}
-                {#if index < profileData.length - 1}
-                    {@const nextPoint = profileData[index + 1]}
+            <!-- Cloud areas (at waypoints only) -->
+            {#each waypointProfileData as point, index}
+                {#if index < waypointProfileData.length - 1}
+                    {@const nextPoint = waypointProfileData[index + 1]}
                     {#if point.cloudBase !== undefined && point.cloudTop !== undefined && point.cloudBase > 0 && point.cloudTop > 0}
                         {@const cloudTopY = altitudeToY(point.cloudTop)}
                         {@const cloudBaseY = altitudeToY(point.cloudBase)}
@@ -331,38 +615,21 @@
                 {/if}
             {/each}
 
-            <!-- Terrain line -->
+            <!-- Terrain polygon -->
             {#if terrainPath}
-                <path
-                    d={terrainPath}
-                    fill="none"
-                    stroke="#8b4513"
-                    stroke-width="2"
+                <polygon
+                    points={terrainPath}
+                    fill="url(#terrainGradient)"
+                    stroke="#8b6914"
+                    stroke-width="2.5"
+                    opacity="1"
                 />
             {/if}
 
-            <!-- Wind component bars -->
-            {#each profileData as point}
-                {#if point.windSpeed > 0 && point.headwindComponent !== 0}
-                    {@const barHeight = Math.max(5, Math.abs(point.headwindComponent) * 3)}
-                    {@const barY = altitudeToY(point.altitude)}
-                    {@const isHeadwind = point.headwindComponent > 0}
-                    <line
-                        x1={distanceToX(point.distance)}
-                        y1={isHeadwind ? barY : barY - barHeight}
-                        x2={distanceToX(point.distance)}
-                        y2={isHeadwind ? barY + barHeight : barY}
-                        stroke={isHeadwind ? '#f44336' : '#4caf50'}
-                        stroke-width="4"
-                        opacity="0.8"
-                    />
-                {/if}
-            {/each}
-
-            <!-- Altitude profile line (segmented by condition) -->
-            {#each profileData as point, index}
-                {#if index < profileData.length - 1}
-                    {@const nextPoint = profileData[index + 1]}
+            <!-- Altitude profile line (waypoints only, segmented by condition) -->
+            {#each waypointProfileData as point, index}
+                {#if index < waypointProfileData.length - 1}
+                    {@const nextPoint = waypointProfileData[index + 1]}
                     {@const segmentColor = getSegmentColor(point.condition)}
                     <line
                         x1={distanceToX(point.distance)}
@@ -376,8 +643,50 @@
                 {/if}
             {/each}
 
+            <!-- Vertical wind barbs at multiple altitude levels -->
+            {#each waypointProfileData as point, pointIndex}
+                {#if point.verticalWinds && point.verticalWinds.length > 0}
+                    {@const x = distanceToX(point.distance)}
+                    <!-- Render wind barbs at each altitude level within maxAltitude -->
+                    {#each point.verticalWinds.filter(w => w.altitudeFeet <= maxAltitude && w.windSpeed >= 3) as wind}
+                        {@const y = altitudeToY(wind.altitudeFeet)}
+                        {@const color = getWindLevelColor(wind.altitudeFeet, point.altitude)}
+                        {@const windBarb = generateSmallWindBarb(x, y, wind.windDir, wind.windSpeed)}
+
+                        <!-- Wind barb staff -->
+                        {#if windBarb.staff}
+                            <path
+                                d={windBarb.staff}
+                                stroke={color}
+                                stroke-width="1.5"
+                                fill="none"
+                            />
+                        {/if}
+
+                        <!-- Wind barb features -->
+                        {#each windBarb.barbs as barb}
+                            <path
+                                d={barb.path}
+                                stroke={color}
+                                stroke-width="1.5"
+                                fill={barb.type === 'triangle' ? color : 'none'}
+                                stroke-linejoin="miter"
+                            />
+                        {/each}
+
+                        <!-- Small dot at wind level position -->
+                        <circle
+                            cx={x}
+                            cy={y}
+                            r="2"
+                            fill={color}
+                        />
+                    {/each}
+                {/if}
+            {/each}
+
             <!-- Waypoint markers -->
-            {#each profileData as point}
+            {#each waypointProfileData as point}
                 <line
                     x1={distanceToX(point.distance)}
                     y1={graphPadding.top}
@@ -433,34 +742,10 @@
                     />
                 {/if}
             {/if}
+            {/key}
         </svg>
     </div>
 
-    <!-- Controls -->
-    <div class="controls">
-        <div class="control-group">
-            <label>Top height: {maxAltitude}ft</label>
-            <input
-                type="range"
-                min="5000"
-                max="50000"
-                step="500"
-                bind:value={maxAltitude}
-                class="slider"
-            />
-        </div>
-        <div class="control-group">
-            <label>Meters/pixel: {scale}m</label>
-            <input
-                type="range"
-                min="100"
-                max="2000"
-                step="50"
-                bind:value={scale}
-                class="slider"
-            />
-        </div>
-    </div>
 </div>
 {/if}
 
@@ -487,9 +772,41 @@
         padding: 8px;
         background: rgba(255, 255, 255, 0.05);
         border-radius: 4px;
-        font-size: 12px;
+        font-size: 11px;
         color: rgba(255, 255, 255, 0.9);
         text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .cursor-waypoint-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .cursor-winds-section {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding-top: 4px;
+        border-top: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .cursor-row {
+        height: 16px;
+        line-height: 16px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .winds-row {
+        display: flex;
+        justify-content: center;
+        gap: 6px;
+        flex-wrap: nowrap;
     }
 
     .condition-legend {
@@ -519,15 +836,34 @@
         color: rgba(255, 255, 255, 0.8);
     }
 
-    .cursor-condition {
+    .vertical-winds-label {
+        color: rgba(255, 255, 255, 0.7);
         font-weight: bold;
-        margin-top: 4px;
+        font-size: 10px;
     }
 
-    .cursor-condition-reasons {
+    .wind-level {
+        color: rgba(255, 255, 255, 0.6);
+        padding: 1px 3px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
         font-size: 10px;
-        color: rgba(255, 255, 255, 0.7);
-        margin-top: 4px;
+    }
+
+    .wind-level.flight-level {
+        color: rgba(76, 175, 80, 1);
+        background: rgba(76, 175, 80, 0.2);
+        font-weight: bold;
+    }
+
+    .wind-level-empty {
+        color: rgba(255, 255, 255, 0.4);
+        font-size: 10px;
+        font-style: italic;
+    }
+
+    .cursor-condition {
+        font-weight: bold;
     }
 
     .graph-container {
@@ -541,58 +877,6 @@
     .profile-graph {
         display: block;
         background: #1a1a1a;
-    }
-
-    .controls {
-        display: flex;
-        gap: 16px;
-        padding: 10px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
-    }
-
-    .control-group {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-    }
-
-    .control-group label {
-        font-size: 11px;
-        color: rgba(255, 255, 255, 0.7);
-    }
-
-    .slider {
-        width: 100%;
-        height: 6px;
-        -webkit-appearance: none;
-        appearance: none;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 3px;
-        outline: none;
-        cursor: pointer;
-
-        &::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 18px;
-            height: 18px;
-            background: #3498db;
-            border-radius: 50%;
-            cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
-
-        &::-moz-range-thumb {
-            width: 18px;
-            height: 18px;
-            background: #3498db;
-            border-radius: 50%;
-            cursor: pointer;
-            border: none;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-        }
     }
 </style>
 
