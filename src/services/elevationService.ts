@@ -261,6 +261,51 @@ export function getElevationAtDistance(
 }
 
 /**
+ * Fetch elevation for a single point
+ * @param lat - Latitude
+ * @param lon - Longitude
+ * @param enableLogging - Enable debug logging
+ * @returns Elevation in feet MSL, or undefined if failed
+ */
+export async function fetchPointElevation(
+    lat: number,
+    lon: number,
+    enableLogging: boolean = false
+): Promise<number | undefined> {
+    try {
+        const url = `https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(6)}&longitude=${lon.toFixed(6)}`;
+
+        if (enableLogging) {
+            console.log(`[VFR Planner] Fetching elevation for point (${lat.toFixed(6)}, ${lon.toFixed(6)})`);
+        }
+
+        const response = await fetch(url);
+
+        if (!response.ok) {
+            throw new Error(`Open-Meteo API error: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.elevation || !Array.isArray(data.elevation) || data.elevation.length === 0) {
+            return undefined;
+        }
+
+        // Convert meters to feet
+        const elevationFeet = Math.round(data.elevation[0] * 3.28084);
+
+        if (enableLogging) {
+            console.log(`[VFR Planner] Elevation at point: ${data.elevation[0]}m = ${elevationFeet}ft MSL`);
+        }
+
+        return elevationFeet;
+    } catch (error) {
+        console.error('[VFR Planner] Error fetching point elevation:', error);
+        return undefined;
+    }
+}
+
+/**
  * Fetch terrain elevation profile for entire flight route
  * @param waypoints - Flight plan waypoints
  * @param sampleIntervalNM - Distance between samples (default: 5 NM)

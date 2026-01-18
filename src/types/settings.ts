@@ -11,6 +11,12 @@ export interface PluginSettings {
     showLabels: boolean;
     allowDrag: boolean;
 
+    // Import options
+    autoTerrainElevation: boolean; // Auto-set terrain elevation for departure/arrival on import
+
+    // AirportDB integration
+    airportdbApiKey: string; // API key from airportdb.io
+
     // Debug options
     enableLogging: boolean;
 
@@ -28,6 +34,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAltitude: 3000,
     showLabels: false,
     allowDrag: true,
+    autoTerrainElevation: true, // Auto-set terrain elevation for departure/arrival
+    airportdbApiKey: '', // User must provide their own API key
     enableLogging: false,
     terrainSampleInterval: 5, // Sample every 5 NM by default
     distanceUnit: 'nm',

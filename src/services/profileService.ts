@@ -3,7 +3,7 @@
  * Provides functions to calculate profile data points for the altitude profile graph
  */
 
-import type { Waypoint } from '../types/flightPlan';
+import type { Waypoint, RunwayInfo } from '../types/flightPlan';
 import type { WaypointWeather, LevelWind } from './weatherService';
 import { calculateHeadwindComponent } from './navigationCalc';
 import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
@@ -53,11 +53,129 @@ export function calculateWindComponent(
 
     // Headwind component: positive = headwind (slows aircraft), negative = tailwind (speeds up)
     const headwind = windSpeed * Math.cos(angleDiff);
-    
+
     // Crosswind component: positive = right crosswind, negative = left crosswind
     const crosswind = windSpeed * Math.sin(angleDiff);
 
     return { headwind, crosswind };
+}
+
+/**
+ * Calculate crosswind component for a specific runway
+ * @param runwayHeading - Runway heading in degrees true
+ * @param windDir - Wind direction in degrees (where wind comes FROM)
+ * @param windSpeed - Wind speed in knots
+ * @returns Absolute crosswind component in knots
+ */
+export function calculateRunwayCrosswind(
+    runwayHeading: number,
+    windDir: number,
+    windSpeed: number
+): number {
+    // Convert to radians
+    const runwayRad = (runwayHeading * Math.PI) / 180;
+    const windRad = (windDir * Math.PI) / 180;
+
+    // Calculate angle difference
+    const angleDiff = runwayRad - windRad;
+
+    // Crosswind component (absolute value - we care about magnitude, not direction)
+    return Math.abs(windSpeed * Math.sin(angleDiff));
+}
+
+/**
+ * Result of best runway analysis
+ */
+export interface BestRunwayResult {
+    runwayIdent: string;        // e.g., "09" or "27L"
+    runwayHeading: number;      // True heading
+    crosswindKt: number;        // Crosswind component in knots (steady wind)
+    headwindKt: number;         // Headwind component (positive = headwind, negative = tailwind)
+    gustCrosswindKt?: number;   // Crosswind component during gusts
+    gustHeadwindKt?: number;    // Headwind component during gusts
+}
+
+/**
+ * Find the best runway for given wind conditions
+ * Best runway = headwind preferred (no tailwind), then lowest crosswind
+ * @param runways - Array of runway info
+ * @param windDir - Wind direction in degrees (where wind comes FROM)
+ * @param windSpeed - Wind speed in knots
+ * @param gustSpeed - Optional gust speed in knots
+ * @returns Best runway result, or null if no runways available
+ */
+export function findBestRunway(
+    runways: RunwayInfo[],
+    windDir: number,
+    windSpeed: number,
+    gustSpeed?: number
+): BestRunwayResult | null {
+    if (!runways || runways.length === 0) {
+        return null;
+    }
+
+    // Collect all runway end options with their wind components
+    const options: BestRunwayResult[] = [];
+
+    for (const runway of runways) {
+        // Check both runway ends
+        const ends = [
+            { ident: runway.lowEnd.ident, heading: runway.lowEnd.headingTrue },
+            { ident: runway.highEnd.ident, heading: runway.highEnd.headingTrue },
+        ];
+
+        for (const end of ends) {
+            if (!end.heading && end.heading !== 0) continue; // Skip if no heading data
+
+            const crosswind = calculateRunwayCrosswind(end.heading, windDir, windSpeed);
+
+            // Calculate headwind component (positive = headwind, negative = tailwind)
+            const runwayRad = (end.heading * Math.PI) / 180;
+            const windRad = (windDir * Math.PI) / 180;
+            const angleDiff = runwayRad - windRad;
+            const headwind = windSpeed * Math.cos(angleDiff);
+
+            // Calculate gust components if gust speed provided
+            let gustCrosswind: number | undefined;
+            let gustHeadwind: number | undefined;
+            if (gustSpeed !== undefined && gustSpeed > 0) {
+                gustCrosswind = calculateRunwayCrosswind(end.heading, windDir, gustSpeed);
+                gustHeadwind = gustSpeed * Math.cos(angleDiff);
+            }
+
+            options.push({
+                runwayIdent: end.ident,
+                runwayHeading: end.heading,
+                crosswindKt: crosswind,
+                headwindKt: headwind,
+                gustCrosswindKt: gustCrosswind,
+                gustHeadwindKt: gustHeadwind,
+            });
+        }
+    }
+
+    if (options.length === 0) {
+        return null;
+    }
+
+    // Sort by: 1) Prefer headwind (no tailwind), 2) Then lowest crosswind
+    // Consider gust crosswind for sorting if available
+    options.sort((a, b) => {
+        // First priority: prefer headwind over tailwind
+        const aHasHeadwind = a.headwindKt >= 0;
+        const bHasHeadwind = b.headwindKt >= 0;
+
+        if (aHasHeadwind && !bHasHeadwind) return -1; // a is better (has headwind)
+        if (!aHasHeadwind && bHasHeadwind) return 1;  // b is better (has headwind)
+
+        // Both have headwind or both have tailwind - pick lowest crosswind
+        // Use gust crosswind if available for worst-case comparison
+        const aXwind = a.gustCrosswindKt ?? a.crosswindKt;
+        const bXwind = b.gustCrosswindKt ?? b.crosswindKt;
+        return aXwind - bXwind;
+    });
+
+    return options[0];
 }
 
 /**
@@ -66,14 +184,16 @@ export function calculateWindComponent(
  * @param flightAltitude - Planned flight altitude MSL
  * @param wx - Weather data for additional parameters
  * @param isTerminal - True if this is a departure or arrival waypoint (wind checks apply)
- * @returns Object with condition assessment and reasons
+ * @param waypoint - Optional waypoint data for runway information (crosswind calculation)
+ * @returns Object with condition assessment, reasons, and best runway info
  */
 export function evaluateSegmentCondition(
     point: ProfileDataPoint,
     flightAltitude: number,
     wx?: WaypointWeather,
-    isTerminal: boolean = false
-): { condition: SegmentCondition; reasons: string[] } {
+    isTerminal: boolean = false,
+    waypoint?: Waypoint
+): { condition: SegmentCondition; reasons: string[]; bestRunway?: BestRunwayResult } {
     const reasons: string[] = [];
 
     // Check for missing critical data
@@ -123,19 +243,53 @@ export function evaluateSegmentCondition(
     // Evaluate conditions - Red (Poor) takes priority
     let isPoor = false;
     let isMarginal = false;
+    let bestRunway: BestRunwayResult | undefined;
 
-    // Wind speed checks - ONLY for departure/arrival waypoints
+    // Wind speed and crosswind checks - ONLY for departure/arrival waypoints
     // High winds and gusts are primarily a concern for takeoff and landing operations
-    if (isTerminal) {
-        if (criteria.windSpeed > 25) {
-            reasons.push(`High wind (${Math.round(criteria.windSpeed)}kt)`);
+    // Use SURFACE wind for terminal operations, not altitude wind
+    if (isTerminal && wx) {
+        const terminalWindSpeed = wx.surfaceWindSpeed ?? criteria.windSpeed;
+        const terminalWindDir = wx.surfaceWindDir ?? point.windDir;
+
+        console.log(`[VFR Runway] Terminal waypoint: ${waypoint?.name}, hasRunways: ${!!waypoint?.runways}, count: ${waypoint?.runways?.length ?? 0}`);
+        console.log(`[VFR Runway] Surface wind: ${Math.round(terminalWindDir)}° @ ${Math.round(terminalWindSpeed)}kt`);
+
+        // Calculate crosswind if runway data is available
+        if (waypoint?.runways && waypoint.runways.length > 0) {
+            console.log(`[VFR Runway] Runways available:`, waypoint.runways.map(r => `${r.lowEnd.ident}/${r.highEnd.ident} (${r.lowEnd.headingTrue}°/${r.highEnd.headingTrue}°)`));
+            bestRunway = findBestRunway(waypoint.runways, terminalWindDir, terminalWindSpeed) ?? undefined;
+
+            if (bestRunway) {
+                console.log(`[VFR Runway] Best runway: ${bestRunway.runwayIdent}, crosswind: ${Math.round(bestRunway.crosswindKt)}kt, headwind: ${Math.round(bestRunway.headwindKt)}kt`);
+                // Crosswind limits (typical light aircraft limits)
+                // > 15kt crosswind is challenging, > 20kt is dangerous for most pilots
+                if (bestRunway.crosswindKt > 20) {
+                    reasons.push(`High crosswind Rwy ${bestRunway.runwayIdent} (${Math.round(bestRunway.crosswindKt)}kt)`);
+                    isPoor = true;
+                } else if (bestRunway.crosswindKt > 15) {
+                    reasons.push(`Crosswind Rwy ${bestRunway.runwayIdent} (${Math.round(bestRunway.crosswindKt)}kt)`);
+                    isMarginal = true;
+                }
+
+                // Tailwind check (> 10kt tailwind is a concern)
+                if (bestRunway.headwindKt < -10) {
+                    reasons.push(`Tailwind Rwy ${bestRunway.runwayIdent} (${Math.round(Math.abs(bestRunway.headwindKt))}kt)`);
+                    isMarginal = true;
+                }
+            }
+        }
+
+        // Overall wind speed check
+        if (terminalWindSpeed > 25) {
+            reasons.push(`High surface wind (${Math.round(terminalWindSpeed)}kt)`);
             isPoor = true;
-        } else if (criteria.windSpeed > 20) {
-            reasons.push(`Elevated wind (${Math.round(criteria.windSpeed)}kt)`);
+        } else if (terminalWindSpeed > 20) {
+            reasons.push(`Elevated surface wind (${Math.round(terminalWindSpeed)}kt)`);
             isMarginal = true;
         }
 
-        // Gust checks
+        // Gust checks (already surface-based)
         if (criteria.gustSpeed !== undefined) {
             if (criteria.gustSpeed > 35) {
                 reasons.push(`High gusts (${Math.round(criteria.gustSpeed)}kt)`);
@@ -177,13 +331,16 @@ export function evaluateSegmentCondition(
         isMarginal = true;
     }
 
-    // Terrain clearance checks
-    if (criteria.terrainClearance < 500) {
-        reasons.push(`Low terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
-        isPoor = true;
-    } else if (criteria.terrainClearance < 1000) {
-        reasons.push(`Marginal terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
-        isMarginal = true;
+    // Terrain clearance checks - SKIP for terminal waypoints (departure/arrival)
+    // At departure the aircraft is on the ground, at arrival it will descend to ground level
+    if (!isTerminal) {
+        if (criteria.terrainClearance < 500) {
+            reasons.push(`Low terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
+            isPoor = true;
+        } else if (criteria.terrainClearance < 1000) {
+            reasons.push(`Marginal terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
+            isMarginal = true;
+        }
     }
 
     // Cloud clearance checks - ONLY when clouds are present
@@ -200,15 +357,15 @@ export function evaluateSegmentCondition(
 
     // Determine final condition
     if (isPoor) {
-        return { condition: 'poor', reasons };
+        return { condition: 'poor', reasons, bestRunway };
     }
 
     if (isMarginal) {
-        return { condition: 'marginal', reasons };
+        return { condition: 'marginal', reasons, bestRunway };
     }
 
     // All checks passed - Good VFR
-    return { condition: 'good', reasons: [] };
+    return { condition: 'good', reasons: [], bestRunway };
 }
 
 /**
@@ -404,7 +561,7 @@ export function calculateProfileData(
             // Evaluate segment condition only for waypoints
             if (isWaypoint && wp) {
                 const isTerminal = elevPoint.waypointIndex === 0 || elevPoint.waypointIndex === waypoints.length - 1;
-                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal);
+                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
                 point.condition = conditionResult.condition;
                 point.conditionReasons = conditionResult.reasons;
             }
@@ -472,7 +629,7 @@ export function calculateProfileData(
             };
 
             const isTerminal = index === 0 || index === waypoints.length - 1;
-            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal);
+            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
             point.condition = conditionResult.condition;
             point.conditionReasons = conditionResult.reasons;
 
