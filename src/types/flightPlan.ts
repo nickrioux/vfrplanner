@@ -10,6 +10,24 @@ export interface LatLon {
     lon: number;
 }
 
+/** Runway end information for crosswind calculations */
+export interface RunwayEnd {
+    ident: string;          // e.g., "09", "27L"
+    headingTrue: number;    // True heading in degrees
+}
+
+/** Runway information for an airport */
+export interface RunwayInfo {
+    id: string;
+    lengthFt: number;
+    widthFt: number;
+    surface: string;
+    lighted: boolean;
+    closed: boolean;
+    lowEnd: RunwayEnd;      // Lower numbered end (e.g., "09")
+    highEnd: RunwayEnd;     // Higher numbered end (e.g., "27")
+}
+
 export interface Waypoint {
     id: string;
     name: string;
@@ -18,6 +36,9 @@ export interface Waypoint {
     lon: number;
     comment?: string;
     elevation?: number; // feet MSL
+    countryCode?: string; // ISO country code for FPL export
+    frequency?: number; // For navaids (MHz for VOR, kHz for NDB)
+    runways?: RunwayInfo[]; // For airports - runway data for crosswind calculations
 
     // User-configurable
     altitude?: number; // planned altitude in feet

@@ -20,11 +20,13 @@ export interface LevelWind {
 }
 
 export interface WaypointWeather {
-    windSpeed: number;      // knots
-    windDir: number;        // degrees
-    windGust?: number;      // knots
+    windSpeed: number;      // knots (at flight altitude)
+    windDir: number;        // degrees (at flight altitude)
+    windGust?: number;      // knots (surface)
     windAltitude?: number;  // feet MSL - altitude at which wind was measured
     windLevel?: string;     // pressure level used (e.g., '850h-900h')
+    surfaceWindSpeed?: number;  // knots (surface wind for terminal operations)
+    surfaceWindDir?: number;    // degrees (surface wind direction)
     verticalWinds?: LevelWind[];  // wind at each pressure level
     temperature: number;    // celsius
     dewPoint?: number;      // celsius
@@ -475,6 +477,9 @@ export function getAllWindLevelsFromMeteogram(
 
                     const speedMs = Math.sqrt(u * u + v * v);
                     const speedKt = speedMs * 1.94384;
+                    // Wind direction formula: atan2(-u, -v) gives direction wind comes FROM
+                    // u = eastward component (positive = wind blowing east)
+                    // v = northward component (positive = wind blowing north)
                     const dir = (Math.atan2(-u, -v) * 180 / Math.PI + 360) % 360;
 
                     winds.push({
@@ -485,7 +490,11 @@ export function getAllWindLevelsFromMeteogram(
                     });
 
                     if (enableLogging) {
-                        console.log(`[VFR Debug] Level ${level} (${levelInfo.altitudeFeet}ft): ${uKey}=${u}, ${vKey}=${v} -> ${Math.round(dir)}°/${Math.round(speedKt)}kt`);
+                        // Detailed U/V calculation logging
+                        console.log(`[VFR Debug] Level ${level} (${levelInfo.altitudeFeet}ft):`);
+                        console.log(`[VFR Debug]   Raw U/V: u=${u.toFixed(2)} m/s (eastward), v=${v.toFixed(2)} m/s (northward)`);
+                        console.log(`[VFR Debug]   Speed: sqrt(${u.toFixed(2)}² + ${v.toFixed(2)}²) = ${speedMs.toFixed(2)} m/s = ${speedKt.toFixed(0)} kt`);
+                        console.log(`[VFR Debug]   Dir: atan2(-${u.toFixed(2)}, -${v.toFixed(2)}) = ${(Math.atan2(-u, -v) * 180 / Math.PI).toFixed(1)}° -> ${Math.round(dir)}° (normalized)`);
                     }
                 }
             }
@@ -927,10 +936,44 @@ export async function fetchWaypointWeather(
         let windData: number[] | undefined;
         let windDirData: number[] | undefined;
 
+        // ALWAYS get surface wind from point forecast for comparison
+        const surfaceWindData = responseData['wind-surface'] || responseData.wind;
+        const surfaceWindDirData = responseData['windDir-surface'] || responseData.windDir;
+
+        // Log comparison between point forecast and meteogram
+        if (surfaceWindData && surfaceWindDirData && waypointName) {
+            const pfWindSpeedMs = surfaceWindData[0];
+            const pfWindSpeedKt = pfWindSpeedMs * 1.94384;
+            const pfWindDir = surfaceWindDirData[0];
+            console.log(`[VFR Debug] === WIND DATA COMPARISON for ${waypointName} ===`);
+            console.log(`[VFR Debug] Point Forecast (what Windy shows):`);
+            console.log(`[VFR Debug]   Surface wind: ${Math.round(pfWindDir)}° @ ${Math.round(pfWindSpeedKt)} kt`);
+
+            if (verticalWinds.length > 0) {
+                const surfaceFromMeteogram = verticalWinds.find(w => w.level === '1000h' || w.altitudeFeet < 1000);
+                if (surfaceFromMeteogram) {
+                    console.log(`[VFR Debug] Meteogram (calculated from U/V):`);
+                    console.log(`[VFR Debug]   ${surfaceFromMeteogram.level}: ${Math.round(surfaceFromMeteogram.windDir)}° @ ${Math.round(surfaceFromMeteogram.windSpeed)} kt`);
+                    const dirDiff = Math.abs(pfWindDir - surfaceFromMeteogram.windDir);
+                    const speedDiff = Math.abs(pfWindSpeedKt - surfaceFromMeteogram.windSpeed);
+                    if (dirDiff > 10 || speedDiff > 5) {
+                        console.log(`[VFR Debug] ⚠️ DISCREPANCY DETECTED!`);
+                        console.log(`[VFR Debug]   Direction diff: ${dirDiff.toFixed(0)}°, Speed diff: ${speedDiff.toFixed(0)} kt`);
+                    }
+                }
+            }
+
+            if (windSpeed !== undefined && windDir !== undefined) {
+                console.log(`[VFR Debug] Selected altitude wind (${usedPressureLevel}):`);
+                console.log(`[VFR Debug]   ${Math.round(windDir)}° @ ${Math.round(windSpeed)} kt`);
+            }
+            console.log(`[VFR Debug] ==========================================`);
+        }
+
         if (windSpeed === undefined || windDir === undefined) {
             usedPressureLevel = 'surface';
-            windData = responseData['wind-surface'] || responseData.wind;
-            windDirData = responseData['windDir-surface'] || responseData.windDir;
+            windData = surfaceWindData;
+            windDirData = surfaceWindDirData;
             gustData = responseData['gust-surface'] || responseData.gust;
 
             if (enableLogging && waypointName) {
@@ -1040,6 +1083,10 @@ export async function fetchWaypointWeather(
                 cbaseValue = isLowerValid ? cbaseLower : (isUpperValid ? cbaseUpper : null);
             }
 
+            if (enableLogging) {
+                console.log(`[VFR Cbase Debug] ${waypointName || 'unknown'}: timestamp=${new Date(effectiveTimestamp).toISOString()}, lowerIndex=${lowerIndex}, upperIndex=${upperIndex}, fraction=${fraction.toFixed(2)}, cbaseLower=${cbaseLower}m (${cbaseLower ? Math.round(metersToFeet(cbaseLower)) : 'N/A'}ft), cbaseUpper=${cbaseUpper}m (${cbaseUpper ? Math.round(metersToFeet(cbaseUpper)) : 'N/A'}ft), final=${cbaseValue}m (${cbaseValue ? Math.round(metersToFeet(cbaseValue)) : 'N/A'}ft)`);
+            }
+
             if (cbaseValue !== null && cbaseValue !== undefined && !isNaN(cbaseValue) && cbaseValue > 0) {
                 cloudBase = cbaseValue;
                 const cloudBaseFeet = metersToFeet(cloudBase);
@@ -1052,12 +1099,38 @@ export async function fetchWaypointWeather(
             ? interpolateValue(gustData[lowerIndex], gustData[upperIndex], fraction) ?? 0
             : gustData[lowerIndex] || 0) : undefined;
 
+        // Extract surface wind for terminal operations (departure/arrival)
+        let surfaceWindSpeedKt: number | undefined;
+        let surfaceWindDirDeg: number | undefined;
+        if (surfaceWindData && surfaceWindDirData) {
+            const surfaceWindLower = surfaceWindData[lowerIndex] || 0;
+            const surfaceWindUpper = surfaceWindData[upperIndex] || 0;
+            const surfaceWindMs = needsInterpolation
+                ? interpolateValue(surfaceWindLower, surfaceWindUpper, fraction) ?? 0
+                : surfaceWindLower;
+            surfaceWindSpeedKt = msToKnots(surfaceWindMs);
+
+            const surfaceDirLower = surfaceWindDirData[lowerIndex] || 0;
+            const surfaceDirUpper = surfaceWindDirData[upperIndex] || 0;
+            surfaceWindDirDeg = surfaceDirLower;
+            if (needsInterpolation) {
+                let diff = surfaceDirUpper - surfaceDirLower;
+                if (diff > 180) diff -= 360;
+                if (diff < -180) diff += 360;
+                surfaceWindDirDeg = surfaceDirLower + diff * fraction;
+                if (surfaceWindDirDeg < 0) surfaceWindDirDeg += 360;
+                if (surfaceWindDirDeg >= 360) surfaceWindDirDeg -= 360;
+            }
+        }
+
         const weather: WaypointWeather = {
             windSpeed: finalWindSpeed,
             windDir: finalWindDir,
             windGust: gustMs !== undefined ? msToKnots(gustMs) : undefined,
             windAltitude: altitude, // Store the altitude at which wind was fetched
             windLevel: usedPressureLevel,
+            surfaceWindSpeed: surfaceWindSpeedKt,
+            surfaceWindDir: surfaceWindDirDeg,
             verticalWinds: verticalWinds.length > 0 ? verticalWinds : undefined,
             temperature: tempCelsius,
             dewPoint: dewPointCelsius,

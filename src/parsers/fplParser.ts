@@ -270,6 +270,7 @@ export function convertToFlightPlan(fpl: FPLFlightPlan, filename?: string): Flig
         lon: fplWp.lon,
         comment: fplWp.comment,
         elevation: fplWp.elevation,
+        countryCode: fplWp.countryCode || undefined,
     }));
 
     // Generate flight plan name

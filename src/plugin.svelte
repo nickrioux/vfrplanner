@@ -52,14 +52,38 @@
             {:else if !flightPlan}
                 <div class="drop-zone-content">
                     <span class="drop-icon">✈️</span>
-                    <span>Drop .fpl file here</span>
-                    <button class="btn-browse" on:click={() => fileInput?.click()}>
-                        Browse...
-                    </button>
+                    <span>Drop .fpl file or</span>
+                    <div class="drop-zone-buttons">
+                        <button class="btn-browse" on:click={() => fileInput?.click()}>
+                            Browse...
+                        </button>
+                        <button class="btn-new" on:click={createNewFlightPlan}>
+                            ✈️ New Plan
+                        </button>
+                    </div>
                 </div>
             {:else}
                 <div class="flight-plan-loaded">
-                    <span class="plan-name">{flightPlan.name}</span>
+                    {#if editingPlanName}
+                        <input
+                            type="text"
+                            class="plan-name-input"
+                            value={flightPlan.name}
+                            on:blur={(e) => finishEditPlanName(e.currentTarget.value)}
+                            on:keydown={(e) => {
+                                if (e.key === 'Enter') finishEditPlanName(e.currentTarget.value);
+                                if (e.key === 'Escape') editingPlanName = false;
+                            }}
+                            on:click|stopPropagation
+                            autofocus
+                        />
+                    {:else}
+                        <span
+                            class="plan-name"
+                            on:click|stopPropagation={startEditPlanName}
+                            title="Click to rename"
+                        >{flightPlan.name}</span>
+                    {/if}
                     <button class="btn-clear" on:click={clearFlightPlan} title="Clear flight plan">✕</button>
                 </div>
             {/if}
@@ -88,7 +112,10 @@
                     {/if}
                 </button>
                 <button class="btn-action" on:click={handleExportGPX} title="Export as GPX">
-                    📥 Export GPX
+                    📥 GPX
+                </button>
+                <button class="btn-action" on:click={handleExportFPL} title="Export as FPL (ForeFlight)">
+                    📥 FPL
                 </button>
                 <button
                     class="btn-action"
@@ -113,6 +140,75 @@
                     {isAddingWaypoint ? '✓ Click map' : '➕ Add Point'}
                 </button>
             </div>
+        {/if}
+
+        <!-- AirportDB Search Section (always visible in Route tab) -->
+        <div class="search-section">
+            <button
+                class="btn-search-toggle"
+                class:active={showSearchPanel}
+                on:click={toggleSearchPanel}
+                title="Search airports by ICAO code from AirportDB"
+            >
+                🔍 {showSearchPanel ? 'Hide Search' : 'Search Airports'}
+            </button>
+
+            {#if showSearchPanel}
+                <div class="search-panel">
+                    <div class="search-input-row">
+                        <input
+                            type="text"
+                            class="search-input"
+                            placeholder="Enter ICAO code (e.g., CYQB, KJFK)..."
+                            bind:value={searchQuery}
+                            on:keydown={(e) => e.key === 'Enter' && handleSearch()}
+                        />
+                        <button
+                            class="btn-search"
+                            on:click={handleSearch}
+                            disabled={isSearching}
+                            title="Search by ICAO code"
+                        >
+                            {isSearching ? '...' : '🔍'}
+                        </button>
+                    </div>
+                    {#if searchError}
+                        <div class="search-error">{searchError}</div>
+                    {/if}
+                    {#if searchResults.airports.length > 0 || searchResults.navaids.length > 0}
+                        <div class="search-results">
+                            {#each searchResults.airports as airport}
+                                {@const info = getAirportDisplayInfo(airport)}
+                                <div class="search-result-item" on:click={() => addAirportToFlightPlan(airport)}>
+                                    <span class="result-icon">✈️</span>
+                                    <span class="result-id">{info.identifier}</span>
+                                    <span class="result-name">{info.name}</span>
+                                    <span class="result-type">{info.type}</span>
+                                    <button class="btn-add-result" title="Add to flight plan">+</button>
+                                </div>
+                            {/each}
+                            {#each searchResults.navaids as navaid}
+                                {@const info = getNavaidDisplayInfo(navaid)}
+                                <div class="search-result-item" on:click={() => addNavaidToFlightPlan(navaid)}>
+                                    <span class="result-icon">📡</span>
+                                    <span class="result-id">{info.identifier}</span>
+                                    <span class="result-name">{info.name}</span>
+                                    <span class="result-type">{info.type}{info.frequency ? ` ${info.frequency}` : ''}</span>
+                                    <button class="btn-add-result" title="Add to flight plan">+</button>
+                                </div>
+                            {/each}
+                        </div>
+                    {/if}
+                    {#if !settings.airportdbApiKey}
+                        <div class="search-hint">
+                            Enter your AirportDB API key in Settings to enable search
+                        </div>
+                    {/if}
+                </div>
+            {/if}
+        </div>
+
+        {#if flightPlan}
             {#if weatherError}
                 <div class="weather-error">{weatherError}</div>
             {/if}
@@ -183,7 +279,26 @@
                             <div class="wp-info">
                                 <div class="wp-name">
                                     <span class="wp-type-icon">{getWaypointIcon(wp.type)}</span>
-                                    {wp.name}
+                                    {#if editingWaypointId === wp.id}
+                                        <input
+                                            type="text"
+                                            class="wp-name-input"
+                                            value={wp.name}
+                                            on:blur={(e) => finishEditWaypointName(wp.id, e.currentTarget.value)}
+                                            on:keydown={(e) => {
+                                                if (e.key === 'Enter') finishEditWaypointName(wp.id, e.currentTarget.value);
+                                                if (e.key === 'Escape') editingWaypointId = null;
+                                            }}
+                                            on:click|stopPropagation
+                                            autofocus
+                                        />
+                                    {:else}
+                                        <span
+                                            class="wp-name-text"
+                                            on:click|stopPropagation={() => startEditWaypointName(wp.id)}
+                                            title="Click to rename"
+                                        >{wp.name}</span>
+                                    {/if}
                                     {#if alerts.length > 0}
                                         <span class="alert-badge" class:warning={alerts.some(a => a.severity === 'warning')}>
                                             ⚠️
@@ -210,7 +325,63 @@
                                             ☁️ {wx.cloudBaseDisplay ?? 'N/A'}
                                         </span>
                                     </div>
+                                    <!-- Best runway info for terminal waypoints -->
+                                    {#if (index === 0 || index === flightPlan.waypoints.length - 1) && wp.runways && wp.runways.length > 0}
+                                        {@const surfaceWind = { speed: wx.surfaceWindSpeed ?? wx.windSpeed, dir: wx.surfaceWindDir ?? wx.windDir }}
+                                        {@const bestRwy = getBestRunway(wp.runways, surfaceWind.dir, surfaceWind.speed, wx.windGust)}
+                                        {@const _ = settings.enableLogging && console.log(`[VFR Gust Debug] ${wp.name}: windGust=${wx.windGust}, bestRwy.gustCrosswindKt=${bestRwy?.gustCrosswindKt}, bestRwy.gustHeadwindKt=${bestRwy?.gustHeadwindKt}`)}
+                                        {@const gustInfo = wx.windGust ? ` | Gust: ${Math.round(wx.windGust)}kt` : ''}
+                                        {@const surfaceWindTooltip = `Surface wind: ${Math.round(surfaceWind.dir)}° @ ${Math.round(surfaceWind.speed)}kt${gustInfo}`}
+                                        {#if bestRwy}
+                                            <div class="wp-runway" title={surfaceWindTooltip}>
+                                                <span class="rwy-label">🛬</span>
+                                                <span class="rwy-best" title="Best runway for current wind">Rwy {bestRwy.runwayIdent}</span>
+                                                <span class="rwy-xwind" class:warning={bestRwy.crosswindKt > 15} class:danger={bestRwy.crosswindKt > 20}
+                                                    title={`Crosswind on Rwy ${bestRwy.runwayIdent}${bestRwy.gustCrosswindKt ? ` (gust: ${Math.round(bestRwy.gustCrosswindKt)}kt)` : ''}`}>
+                                                    Xwind {Math.round(bestRwy.crosswindKt)}{#if bestRwy.gustCrosswindKt}<span class="gust-component">G{Math.round(bestRwy.gustCrosswindKt)}</span>{/if}kt
+                                                </span>
+                                                {#if bestRwy.headwindKt < 0}
+                                                    <span class="rwy-tailwind" class:warning={bestRwy.headwindKt < -10}
+                                                        title={`Tailwind${bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt < 0 ? ` (gust: ${Math.round(Math.abs(bestRwy.gustHeadwindKt))}kt)` : ''}`}>
+                                                        Tail {Math.round(Math.abs(bestRwy.headwindKt))}{#if bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt < 0}<span class="gust-component">G{Math.round(Math.abs(bestRwy.gustHeadwindKt))}</span>{/if}kt
+                                                    </span>
+                                                {:else}
+                                                    <span class="rwy-headwind" title={`Headwind${bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt >= 0 ? ` (gust: ${Math.round(bestRwy.gustHeadwindKt)}kt)` : ''}`}>
+                                                        Head {Math.round(bestRwy.headwindKt)}{#if bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt >= 0}<span class="gust-component">G{Math.round(bestRwy.gustHeadwindKt)}</span>{/if}kt
+                                                    </span>
+                                                {/if}
+                                            </div>
+                                        {/if}
+                                    {/if}
                                 {/if}
+                                <div class="wp-altitude">
+                                    <span class="altitude-label">✈️</span>
+                                    {#if editingWaypointAltitudeId === wp.id}
+                                        <input
+                                            type="number"
+                                            class="wp-altitude-input"
+                                            value={getWaypointAltitude(wp)}
+                                            min="0"
+                                            max="45000"
+                                            step="500"
+                                            on:blur={(e) => finishEditWaypointAltitude(wp.id, e.currentTarget.value)}
+                                            on:keydown={(e) => {
+                                                if (e.key === 'Enter') finishEditWaypointAltitude(wp.id, e.currentTarget.value);
+                                                if (e.key === 'Escape') editingWaypointAltitudeId = null;
+                                            }}
+                                            on:click|stopPropagation
+                                            autofocus
+                                        />
+                                        <span class="altitude-unit">ft</span>
+                                    {:else}
+                                        <span
+                                            class="wp-altitude-text"
+                                            class:is-custom={wp.altitude !== undefined}
+                                            on:click|stopPropagation={() => startEditWaypointAltitude(wp.id)}
+                                            title="Click to change altitude"
+                                        >{getWaypointAltitude(wp).toLocaleString()} ft</span>
+                                    {/if}
+                                </div>
                             </div>
                             <div class="wp-nav">
                                 {#if index > 0}
@@ -325,6 +496,20 @@
                 <label class="setting-checkbox">
                     <input
                         type="checkbox"
+                        bind:checked={settings.autoTerrainElevation}
+                        on:change={handleSettingsChange}
+                    />
+                    Auto terrain elevation for departure/arrival
+                </label>
+                <div class="setting-description">
+                    Automatically fetch terrain elevation for first and last waypoints when importing or creating a flight plan.
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
                         bind:checked={settings.showLabels}
                         on:change={handleSettingsChange}
                     />
@@ -369,6 +554,21 @@
             </div>
 
             <div class="setting-group">
+                <label class="setting-label">AirportDB API Key</label>
+                <input
+                    type="password"
+                    class="setting-input api-key-input"
+                    bind:value={settings.airportdbApiKey}
+                    on:change={handleSettingsChange}
+                    placeholder="Enter your API key"
+                />
+                <div class="setting-description">
+                    Required for airport search by ICAO code. Get a free key at
+                    <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
+                </div>
+            </div>
+
+            <div class="setting-group">
                 <label class="setting-checkbox">
                     <input
                         type="checkbox"
@@ -397,6 +597,7 @@
     import { readFPLFile, convertToFlightPlan, validateFPL } from './parsers/fplParser';
     import { calculateFlightPlanNavigation, formatDistance, formatBearing, formatEte, calculateGroundSpeed, formatHeadwind, calculateHeadwindComponent } from './services/navigationCalc';
     import { downloadGPX } from './exporters/gpxExporter';
+    import { downloadFPL } from './exporters/fplExporter';
     import {
         fetchFlightPlanWeather,
         checkWeatherAlerts,
@@ -409,9 +610,19 @@
         type WeatherAlert,
         type ForecastTimeRange,
     } from './services/weatherService';
-    import { calculateProfileData, type SegmentCondition } from './services/profileService';
-    import { fetchRouteElevationProfile, type ElevationPoint } from './services/elevationService';
-    import type { FlightPlan, Waypoint, WaypointType, PluginSettings } from './types';
+    import { calculateProfileData, findBestRunway, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { fetchRouteElevationProfile, fetchPointElevation, type ElevationPoint } from './services/elevationService';
+    import {
+        searchAirport,
+        getAirportByICAO,
+        airportToWaypoint,
+        navaidToWaypoint,
+        getAirportDisplayInfo,
+        getNavaidDisplayInfo,
+        type AirportDBResult,
+        type AirportDBNavaid,
+    } from './services/airportdbService';
+    import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
     import { DEFAULT_SETTINGS } from './types';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
 
@@ -425,11 +636,21 @@
     // State
     let flightPlan: FlightPlan | null = null;
     let selectedWaypointId: string | null = null;
+    let editingWaypointId: string | null = null;
+    let editingWaypointAltitudeId: string | null = null;
+    let editingPlanName: boolean = false;
     let isLoading = false;
     let isDragOver = false;
     let error: string | null = null;
     let fileInput: HTMLInputElement;
     let activeTab: 'route' | 'profile' | 'settings' = 'route';
+
+    // AirportDB search state
+    let searchQuery = '';
+    let searchResults: { airports: AirportDBResult[]; navaids: AirportDBNavaid[] } = { airports: [], navaids: [] };
+    let isSearching = false;
+    let searchError: string | null = null;
+    let showSearchPanel = false;
     let isAddingWaypoint = false;
 
     // Weather state
@@ -502,6 +723,11 @@
         }
     }
 
+    // Get best runway for given wind conditions
+    function getBestRunway(runways: RunwayInfo[], windDir: number, windSpeed: number, gustSpeed?: number): BestRunwayResult | null {
+        return findBestRunway(runways, windDir, windSpeed, gustSpeed);
+    }
+
     // Drag and drop handlers
     function handleDragOver(event: DragEvent) {
         event.preventDefault();
@@ -556,6 +782,107 @@
             plan.aircraft.airspeed = settings.defaultAirspeed;
             plan.aircraft.defaultAltitude = settings.defaultAltitude;
 
+            // Auto-set terrain elevation for departure/arrival if enabled
+            if (settings.autoTerrainElevation && plan.waypoints.length >= 1) {
+                // Fetch departure elevation
+                const departureWp = plan.waypoints[0];
+                const departureElevation = await fetchPointElevation(departureWp.lat, departureWp.lon, settings.enableLogging);
+                if (departureElevation !== undefined) {
+                    plan.waypoints[0] = { ...departureWp, altitude: departureElevation };
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] Set departure ${departureWp.name} elevation to ${departureElevation}ft`);
+                    }
+                }
+
+                // Fetch arrival elevation (if different from departure)
+                if (plan.waypoints.length >= 2) {
+                    const arrivalWp = plan.waypoints[plan.waypoints.length - 1];
+                    const arrivalElevation = await fetchPointElevation(arrivalWp.lat, arrivalWp.lon, settings.enableLogging);
+                    if (arrivalElevation !== undefined) {
+                        plan.waypoints[plan.waypoints.length - 1] = { ...arrivalWp, altitude: arrivalElevation };
+                        if (settings.enableLogging) {
+                            console.log(`[VFR Planner] Set arrival ${arrivalWp.name} elevation to ${arrivalElevation}ft`);
+                        }
+                    }
+                }
+            }
+
+            // Fetch runway data for departure/arrival airports (if API key available)
+            console.log(`[VFR Runway Debug] API key present: ${!!settings.airportdbApiKey}, waypoints: ${plan.waypoints.length}`);
+            if (settings.airportdbApiKey && plan.waypoints.length >= 1) {
+                // Fetch departure runway data
+                const departureWp = plan.waypoints[0];
+                console.log(`[VFR Runway Debug] Departure: ${departureWp.name}, type: ${departureWp.type}, hasRunways: ${!!departureWp.runways}`);
+                if (departureWp.type === 'AIRPORT' && !departureWp.runways) {
+                    try {
+                        console.log(`[VFR Runway Debug] Fetching runway data for ${departureWp.name}...`);
+                        const airportData = await getAirportByICAO(departureWp.name, settings.airportdbApiKey);
+                        console.log(`[VFR Runway Debug] AirportDB response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                        if (airportData?.runways && airportData.runways.length > 0) {
+                            console.log(`[VFR Runway Debug] Raw runways for ${departureWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                            // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
+                            const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
+                            console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                            const runways = filteredRunways.map(rwy => {
+                                console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                return {
+                                    id: rwy.id,
+                                    lengthFt: rwy.length_ft,
+                                    widthFt: rwy.width_ft,
+                                    surface: rwy.surface,
+                                    lighted: rwy.lighted,
+                                    closed: rwy.closed,
+                                    lowEnd: { ident: rwy.le_ident, headingTrue: rwy.le_heading_degT },
+                                    highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
+                                };
+                            });
+                            console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                            plan.waypoints[0] = { ...plan.waypoints[0], runways };
+                            console.log(`[VFR Planner] Loaded ${runways.length} runways for departure ${departureWp.name}`);
+                        }
+                    } catch (err) {
+                        console.warn(`[VFR Planner] Could not fetch runway data for ${departureWp.name}:`, err);
+                    }
+                }
+
+                // Fetch arrival runway data (if different from departure)
+                if (plan.waypoints.length >= 2) {
+                    const arrivalWp = plan.waypoints[plan.waypoints.length - 1];
+                    console.log(`[VFR Runway Debug] Arrival: ${arrivalWp.name}, type: ${arrivalWp.type}, hasRunways: ${!!arrivalWp.runways}`);
+                    if (arrivalWp.type === 'AIRPORT' && !arrivalWp.runways && arrivalWp.name !== plan.waypoints[0].name) {
+                        try {
+                            console.log(`[VFR Runway Debug] Fetching runway data for ${arrivalWp.name}...`);
+                            const airportData = await getAirportByICAO(arrivalWp.name, settings.airportdbApiKey);
+                            console.log(`[VFR Runway Debug] AirportDB response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                            if (airportData?.runways && airportData.runways.length > 0) {
+                                console.log(`[VFR Runway Debug] Raw runways for ${arrivalWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                                // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
+                                const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
+                                console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                                const runways = filteredRunways.map(rwy => {
+                                    console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                    return {
+                                        id: rwy.id,
+                                        lengthFt: rwy.length_ft,
+                                        widthFt: rwy.width_ft,
+                                        surface: rwy.surface,
+                                        lighted: rwy.lighted,
+                                        closed: rwy.closed,
+                                        lowEnd: { ident: rwy.le_ident, headingTrue: rwy.le_heading_degT },
+                                        highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
+                                    };
+                                });
+                                console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                                plan.waypoints[plan.waypoints.length - 1] = { ...plan.waypoints[plan.waypoints.length - 1], runways };
+                                console.log(`[VFR Planner] Loaded ${runways.length} runways for arrival ${arrivalWp.name}`);
+                            }
+                        } catch (err) {
+                            console.warn(`[VFR Planner] Could not fetch runway data for ${arrivalWp.name}:`, err);
+                        }
+                    }
+                }
+            }
+
             // Calculate navigation data
             const navResult = calculateFlightPlanNavigation(plan.waypoints, plan.aircraft.airspeed);
             plan = {
@@ -587,6 +914,42 @@
         forecastRange = null;
         departureTime = Date.now();
         clearMapLayers();
+        saveSession();
+    }
+
+    function createNewFlightPlan() {
+        // Generate a name based on current date/time
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+        flightPlan = {
+            id: `plan-${Date.now()}`,
+            name: `New Plan - ${dateStr} ${timeStr}`,
+            waypoints: [],
+            aircraft: {
+                airspeed: settings.defaultAirspeed,
+                defaultAltitude: settings.defaultAltitude,
+            },
+            totals: {
+                distance: 0,
+                ete: 0,
+            },
+            sourceFormat: 'manual',
+        };
+
+        // Clear any previous state
+        selectedWaypointId = null;
+        error = null;
+        weatherData = new Map();
+        weatherAlerts = new Map();
+        weatherError = null;
+
+        // Enable waypoint adding mode immediately
+        isAddingWaypoint = true;
+
+        // Update map
+        updateMapLayers();
         saveSession();
     }
 
@@ -740,14 +1103,122 @@
         saveSession();
     }
 
-    function deleteWaypoint(waypointId: string) {
+    function startEditWaypointName(waypointId: string) {
+        editingWaypointId = waypointId;
+    }
+
+    function finishEditWaypointName(waypointId: string, newName: string) {
         if (!flightPlan) return;
+
+        const trimmedName = newName.trim();
+        if (trimmedName === '') {
+            editingWaypointId = null;
+            return;
+        }
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: flightPlan.waypoints.map(wp =>
+                wp.id === waypointId ? { ...wp, name: trimmedName } : wp
+            ),
+        };
+
+        editingWaypointId = null;
+        updateMapLayers();
+        saveSession();
+    }
+
+    function startEditPlanName() {
+        editingPlanName = true;
+    }
+
+    function finishEditPlanName(newName: string) {
+        if (!flightPlan) return;
+
+        const trimmedName = newName.trim();
+        if (trimmedName === '') {
+            editingPlanName = false;
+            return;
+        }
+
+        flightPlan = {
+            ...flightPlan,
+            name: trimmedName,
+        };
+
+        editingPlanName = false;
+        saveSession();
+    }
+
+    function startEditWaypointAltitude(waypointId: string) {
+        editingWaypointAltitudeId = waypointId;
+    }
+
+    function finishEditWaypointAltitude(waypointId: string, newAltitude: string) {
+        if (!flightPlan) return;
+
+        const altitude = parseInt(newAltitude, 10);
+        if (isNaN(altitude) || altitude < 0) {
+            editingWaypointAltitudeId = null;
+            return;
+        }
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: flightPlan.waypoints.map(wp =>
+                wp.id === waypointId ? { ...wp, altitude } : wp
+            ),
+        };
+
+        editingWaypointAltitudeId = null;
+        updateMapLayers();
+        saveSession();
+    }
+
+    function getWaypointAltitude(wp: Waypoint): number {
+        return wp.altitude ?? flightPlan?.aircraft.defaultAltitude ?? settings.defaultAltitude;
+    }
+
+    async function deleteWaypoint(waypointId: string) {
+        if (!flightPlan) return;
+
+        const deletedIndex = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
+        const wasDeparture = deletedIndex === 0;
+        const wasArrival = deletedIndex === flightPlan.waypoints.length - 1;
 
         const newWaypoints = flightPlan.waypoints.filter(wp => wp.id !== waypointId);
 
         if (newWaypoints.length === 0) {
             clearFlightPlan();
             return;
+        }
+
+        // Update altitudes for new departure/arrival if autoTerrainElevation is enabled
+        if (settings.autoTerrainElevation && newWaypoints.length > 0) {
+            // If we deleted the departure, the new first waypoint becomes departure
+            if (wasDeparture && newWaypoints.length > 0) {
+                const newDeparture = newWaypoints[0];
+                const terrainElevation = await fetchPointElevation(newDeparture.lat, newDeparture.lon, settings.enableLogging);
+                if (terrainElevation !== undefined) {
+                    newWaypoints[0] = { ...newDeparture, altitude: terrainElevation };
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] New departure ${newDeparture.name}: ${terrainElevation} ft`);
+                    }
+                }
+            }
+
+            // If we deleted the arrival, the new last waypoint becomes arrival
+            if (wasArrival && newWaypoints.length > 0) {
+                const newArrivalIndex = newWaypoints.length - 1;
+                const newArrival = newWaypoints[newArrivalIndex];
+                const terrainElevation = await fetchPointElevation(newArrival.lat, newArrival.lon, settings.enableLogging);
+                if (terrainElevation !== undefined) {
+                    newWaypoints[newArrivalIndex] = { ...newArrival, altitude: terrainElevation };
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] New arrival ${newArrival.name}: ${terrainElevation} ft`);
+                    }
+                }
+            }
         }
 
         // Recalculate navigation
@@ -794,24 +1265,245 @@
         isAddingWaypoint = !isAddingWaypoint;
     }
 
-    function handleMapClick(latLon: LatLon) {
+    // AirportDB Search Functions
+    async function handleSearch() {
+        if (!searchQuery.trim()) {
+            searchResults = { airports: [], navaids: [] };
+            return;
+        }
+
+        if (!settings.airportdbApiKey) {
+            searchError = 'Please enter your AirportDB API key in Settings';
+            return;
+        }
+
+        isSearching = true;
+        searchError = null;
+
+        try {
+            // AirportDB only supports exact ICAO lookup
+            const airport = await searchAirport(searchQuery.trim(), settings.airportdbApiKey);
+            if (airport) {
+                // Airport found - also include its navaids
+                searchResults = {
+                    airports: [airport],
+                    navaids: airport.navaids || []
+                };
+            } else {
+                searchResults = { airports: [], navaids: [] };
+                searchError = 'No airport found. Try an exact ICAO code (e.g., CYQB, KJFK)';
+            }
+        } catch (err) {
+            searchError = err instanceof Error ? err.message : 'Search failed';
+            searchResults = { airports: [], navaids: [] };
+        } finally {
+            isSearching = false;
+        }
+    }
+
+    async function addAirportToFlightPlan(airport: AirportDBResult) {
+        if (!flightPlan) {
+            // Create new flight plan if none exists
+            createNewFlightPlan();
+        }
+        if (!flightPlan) return;
+
+        const waypoint = airportToWaypoint(airport);
+
+        // Check if already in flight plan
+        if (flightPlan.waypoints.some(wp => wp.name === waypoint.name)) {
+            searchError = `${waypoint.name} is already in the flight plan`;
+            return;
+        }
+
+        const isFirstWaypoint = flightPlan.waypoints.length === 0;
+        // New waypoint will be added at the end, so it becomes the new arrival
+
+        // Build new waypoints array with proper altitudes
+        let updatedWaypoints = [...flightPlan.waypoints];
+
+        if (settings.autoTerrainElevation) {
+            // Departure or arrival: use terrain elevation (from airport or fetched)
+            if (!waypoint.altitude || waypoint.altitude === 0) {
+                const terrainElevation = await fetchPointElevation(waypoint.lat, waypoint.lon, settings.enableLogging);
+                if (terrainElevation !== undefined) {
+                    waypoint.altitude = terrainElevation;
+                    waypoint.elevation = terrainElevation;
+                }
+            }
+            if (settings.enableLogging) {
+                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
+            }
+
+            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
+            if (updatedWaypoints.length > 1) {
+                const previousArrivalIndex = updatedWaypoints.length - 1;
+                const previousArrival = updatedWaypoints[previousArrivalIndex];
+                // Only change if it had terrain elevation (not manually set high altitude)
+                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
+                        idx === previousArrivalIndex
+                            ? { ...wp, altitude: settings.defaultAltitude }
+                            : wp
+                    );
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                    }
+                }
+            }
+        }
+
+        // Add new waypoint
+        updatedWaypoints = [...updatedWaypoints, waypoint];
+
+        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: navResult.waypoints,
+            totals: navResult.totals,
+        };
+
+        updateMapLayers();
+        saveSession();
+
+        // Clear search after adding
+        searchQuery = '';
+        searchResults = { airports: [], navaids: [] };
+        searchError = null;
+    }
+
+    async function addNavaidToFlightPlan(navaid: AirportDBNavaid) {
+        if (!flightPlan) {
+            createNewFlightPlan();
+        }
+        if (!flightPlan) return;
+
+        const waypoint = navaidToWaypoint(navaid);
+
+        // Check if already in flight plan
+        if (flightPlan.waypoints.some(wp => wp.name === waypoint.name)) {
+            searchError = `${waypoint.name} is already in the flight plan`;
+            return;
+        }
+
+        const isFirstWaypoint = flightPlan.waypoints.length === 0;
+        // New waypoint will be added at the end, so it becomes the new arrival
+
+        // Build new waypoints array with proper altitudes
+        let updatedWaypoints = [...flightPlan.waypoints];
+
+        if (settings.autoTerrainElevation) {
+            // Departure or arrival: use terrain elevation (from navaid or fetched)
+            if (!waypoint.altitude || waypoint.altitude === 0) {
+                const terrainElevation = await fetchPointElevation(waypoint.lat, waypoint.lon, settings.enableLogging);
+                if (terrainElevation !== undefined) {
+                    waypoint.altitude = terrainElevation;
+                    waypoint.elevation = terrainElevation;
+                }
+            }
+            if (settings.enableLogging) {
+                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
+            }
+
+            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
+            if (updatedWaypoints.length > 1) {
+                const previousArrivalIndex = updatedWaypoints.length - 1;
+                const previousArrival = updatedWaypoints[previousArrivalIndex];
+                // Only change if it had terrain elevation (not manually set high altitude)
+                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
+                        idx === previousArrivalIndex
+                            ? { ...wp, altitude: settings.defaultAltitude }
+                            : wp
+                    );
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                    }
+                }
+            }
+        }
+
+        // Add new waypoint
+        updatedWaypoints = [...updatedWaypoints, waypoint];
+
+        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
+
+        flightPlan = {
+            ...flightPlan,
+            waypoints: navResult.waypoints,
+            totals: navResult.totals,
+        };
+
+        updateMapLayers();
+        saveSession();
+
+        // Clear search after adding
+        searchQuery = '';
+        searchResults = { airports: [], navaids: [] };
+        searchError = null;
+    }
+
+    function toggleSearchPanel() {
+        showSearchPanel = !showSearchPanel;
+        if (!showSearchPanel) {
+            searchQuery = '';
+            searchResults = { airports: [], navaids: [] };
+            searchError = null;
+        }
+    }
+
+    async function handleMapClick(latLon: LatLon) {
         if (!isAddingWaypoint || !flightPlan) return;
 
         const { lat, lon } = latLon;
+        const isFirstWaypoint = flightPlan.waypoints.length === 0;
 
-        // Create new waypoint
+        // Build new waypoints array with proper altitudes
+        let updatedWaypoints = [...flightPlan.waypoints];
+
+        // Fetch terrain elevation for departure or arrival waypoints (if setting enabled)
+        let altitude: number | undefined;
+        if (settings.autoTerrainElevation) {
+            // Departure or arrival: use terrain elevation
+            altitude = await fetchPointElevation(lat, lon, settings.enableLogging);
+            if (settings.enableLogging) {
+                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} waypoint terrain elevation: ${altitude ?? 'N/A'} ft`);
+            }
+
+            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
+            if (updatedWaypoints.length > 1) {
+                const previousArrivalIndex = updatedWaypoints.length - 1;
+                const previousArrival = updatedWaypoints[previousArrivalIndex];
+                // Only change if it had terrain elevation (not manually set high altitude)
+                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
+                        idx === previousArrivalIndex
+                            ? { ...wp, altitude: settings.defaultAltitude }
+                            : wp
+                    );
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                    }
+                }
+            }
+        }
+
+        // Create new waypoint with terrain elevation for departure/arrival
         const newWaypoint: Waypoint = {
             id: `wp-${Date.now()}`,
             name: `WPT${flightPlan.waypoints.length + 1}`,
             type: 'USER WAYPOINT',
             lat,
             lon,
+            altitude: altitude, // terrain elevation for departure/arrival
         };
 
-        const newWaypoints = [...flightPlan.waypoints, newWaypoint];
+        // Add new waypoint
+        updatedWaypoints = [...updatedWaypoints, newWaypoint];
 
         // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, settings.defaultAirspeed);
+        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
 
         flightPlan = {
             ...flightPlan,
@@ -847,6 +1539,11 @@
     function handleExportGPX() {
         if (!flightPlan) return;
         downloadGPX(flightPlan);
+    }
+
+    function handleExportFPL() {
+        if (!flightPlan) return;
+        downloadFPL(flightPlan);
     }
 
     function handleSendToDistancePlanning() {
@@ -1025,6 +1722,33 @@
     function recalculateWithWind() {
         if (!flightPlan) return;
 
+        console.log('=== FLIGHT TIME CALCULATION WITH WIND ===');
+        console.log(`TAS (True Airspeed): ${settings.defaultAirspeed} kt`);
+        console.log(`Default Cruise Altitude: ${settings.defaultAltitude} ft`);
+        console.log('NOTE: All tracks and wind directions are in TRUE NORTH reference');
+        console.log('');
+
+        // Debug: Show all wind data for each waypoint
+        console.log('=== WIND DATA BY WAYPOINT ===');
+        flightPlan.waypoints.forEach((wp, idx) => {
+            const wx = weatherData.get(wp.id);
+            if (wx) {
+                console.log(`WP${idx} ${wp.name || 'UNNAMED'} (alt: ${wp.altitude || 'N/A'} ft):`);
+                console.log(`  Wind reported: ${wx.windDir?.toFixed(0)}° @ ${wx.windSpeed?.toFixed(0)} kt`);
+                console.log(`  Wind level used: ${wx.windLevel || 'unknown'}`);
+                console.log(`  Wind altitude: ${wx.windAltitude || 'surface'} ft`);
+                if (wx.verticalWinds && wx.verticalWinds.length > 0) {
+                    console.log(`  Vertical wind profile:`);
+                    wx.verticalWinds.forEach(vw => {
+                        console.log(`    ${vw.level} (${vw.altitudeFeet} ft): ${vw.windDir.toFixed(0)}° @ ${vw.windSpeed.toFixed(0)} kt`);
+                    });
+                }
+            } else {
+                console.log(`WP${idx} ${wp.name || 'UNNAMED'}: No weather data`);
+            }
+        });
+        console.log('');
+
         // Recalculate ground speed for each leg with wind correction
         const updatedWaypoints = flightPlan.waypoints.map((wp, index) => {
             if (index === 0) return wp;
@@ -1041,15 +1765,56 @@
                     wx.windSpeed
                 );
 
+                // Calculate headwind component for logging
+                const headwind = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
+
                 // Recalculate ETE with ground speed
                 const distance = wp.distance || 0;
                 const ete = gs > 0 ? (distance / gs) * 60 : 0; // minutes
+
+                // Calculate crosswind component for logging
+                const trackRad = (wp.bearing * Math.PI) / 180;
+                const windRad = (wx.windDir * Math.PI) / 180;
+                const crosswind = wx.windSpeed * Math.sin(windRad - trackRad);
+
+                // Log leg details with full calculation breakdown
+                console.log(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
+                console.log(`  Distance: ${distance.toFixed(1)} NM`);
+                console.log(`  Track (TRUE): ${wp.bearing.toFixed(0)}°`);
+                console.log(`  Wind (TRUE): ${wx.windDir.toFixed(0)}° @ ${wx.windSpeed.toFixed(0)} kt`);
+                console.log(`  --- Ground Speed Calculation ---`);
+                console.log(`    Wind angle relative to track: ${((wx.windDir - wp.bearing + 360) % 360).toFixed(0)}°`);
+                console.log(`    Formula: headwind = windSpeed × cos(windDir - track)`);
+                console.log(`           = ${wx.windSpeed.toFixed(1)} × cos(${wx.windDir.toFixed(0)}° - ${wp.bearing.toFixed(0)}°)`);
+                console.log(`           = ${wx.windSpeed.toFixed(1)} × cos(${(wx.windDir - wp.bearing).toFixed(0)}°)`);
+                console.log(`           = ${wx.windSpeed.toFixed(1)} × ${Math.cos((wx.windDir - wp.bearing) * Math.PI / 180).toFixed(3)}`);
+                console.log(`           = ${headwind.toFixed(1)} kt (${headwind >= 0 ? 'HEADWIND' : 'TAILWIND'})`);
+                console.log(`    Crosswind: ${Math.abs(crosswind).toFixed(1)} kt from ${crosswind >= 0 ? 'RIGHT' : 'LEFT'}`);
+                console.log(`    Ground Speed = TAS - headwind`);
+                console.log(`                 = ${settings.defaultAirspeed} - (${headwind.toFixed(1)})`);
+                console.log(`                 = ${gs.toFixed(1)} kt`);
+                console.log(`  --- ETE Calculation ---`);
+                console.log(`    ETE = Distance / Ground Speed × 60`);
+                console.log(`        = ${distance.toFixed(1)} / ${gs.toFixed(1)} × 60`);
+                console.log(`        = ${ete.toFixed(1)} min (${Math.floor(ete / 60)}h ${Math.round(ete % 60)}m)`);
+                console.log('');
 
                 return {
                     ...wp,
                     groundSpeed: gs,
                     ete,
                 };
+            } else {
+                // Log leg without wind data
+                const distance = wp.distance || 0;
+                const ete = wp.ete || 0;
+                console.log(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
+                console.log(`  Distance: ${distance.toFixed(1)} NM`);
+                console.log(`  Track (TRUE): ${wp.bearing !== undefined ? wp.bearing.toFixed(0) + '°' : 'N/A'}`);
+                console.log(`  Wind: No wind data available`);
+                console.log(`  Ground Speed: ${settings.defaultAirspeed} kt (using TAS, no wind correction)`);
+                console.log(`  ETE: ${ete.toFixed(1)} min`);
+                console.log('');
             }
 
             return wp;
@@ -1058,7 +1823,7 @@
         // Recalculate totals
         const totalEte = updatedWaypoints.reduce((sum, wp) => sum + (wp.ete || 0), 0);
         const totalDistance = updatedWaypoints.reduce((sum, wp) => sum + (wp.distance || 0), 0);
-        
+
         // Calculate distance-weighted average headwind
         let weightedHeadwindSum = 0;
         updatedWaypoints.forEach((wp, index) => {
@@ -1070,6 +1835,16 @@
             }
         });
         const averageHeadwind = totalDistance > 0 ? weightedHeadwindSum / totalDistance : undefined;
+
+        // Log summary
+        console.log('=== FLIGHT SUMMARY ===');
+        console.log(`Total Distance: ${totalDistance.toFixed(1)} NM`);
+        console.log(`Total ETE: ${totalEte.toFixed(1)} min (${Math.floor(totalEte / 60)}h ${Math.round(totalEte % 60)}m)`);
+        if (averageHeadwind !== undefined) {
+            console.log(`Average Headwind: ${averageHeadwind >= 0 ? '+' : ''}${averageHeadwind.toFixed(1)} kt`);
+        }
+        console.log('=====================================');
+        console.log('');
 
         flightPlan = {
             ...flightPlan,
@@ -1356,6 +2131,55 @@
                     tooltipContent += '</table>';
                     tooltipContent += '</div>';
                 }
+
+                // Add runway info for terminal waypoints (departure/arrival)
+                const isTerminal = index === 0 || index === flightPlan.waypoints.length - 1;
+                if (isTerminal && wp.runways && wp.runways.length > 0) {
+                    const surfaceWindSpeed = wx.surfaceWindSpeed ?? wx.windSpeed;
+                    const surfaceWindDir = wx.surfaceWindDir ?? wx.windDir;
+                    const bestRwy = getBestRunway(wp.runways, surfaceWindDir, surfaceWindSpeed, wx.windGust);
+
+                    if (bestRwy) {
+                        tooltipContent += '<div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #444; font-size: 11px;">';
+                        tooltipContent += `<b>🛬 Surface Wind:</b> ${Math.round(surfaceWindDir)}° @ ${Math.round(surfaceWindSpeed)}kt`;
+                        if (wx.windGust) {
+                            const gustColor = wx.windGust > 35 ? '#e74c3c' : (wx.windGust > 25 ? '#f39c12' : '#9b59b6');
+                            tooltipContent += ` <span style="color: ${gustColor}; font-weight: bold;">G${Math.round(wx.windGust)}kt</span>`;
+                        }
+                        tooltipContent += '<br/>';
+                        tooltipContent += `<b>Best Runway:</b> <span style="color: #3498db; font-weight: bold;">${bestRwy.runwayIdent}</span>`;
+                        tooltipContent += ` (hdg ${Math.round(bestRwy.runwayHeading)}°)`;
+                        tooltipContent += '<br/>';
+
+                        // Crosswind
+                        const xwindColor = bestRwy.crosswindKt > 20 ? '#e74c3c' : (bestRwy.crosswindKt > 15 ? '#f39c12' : '#2ecc71');
+                        let xwindText = `Xwind: ${Math.round(bestRwy.crosswindKt)}`;
+                        if (bestRwy.gustCrosswindKt) {
+                            xwindText += `<span style="color: #9b59b6; font-weight: bold;">G${Math.round(bestRwy.gustCrosswindKt)}</span>`;
+                        }
+                        xwindText += 'kt';
+                        tooltipContent += `<span style="color: ${xwindColor};">${xwindText}</span>`;
+
+                        // Headwind/Tailwind
+                        if (bestRwy.headwindKt < 0) {
+                            const tailColor = bestRwy.headwindKt < -10 ? '#e74c3c' : '#e67e22';
+                            let tailText = `Tailwind: ${Math.round(Math.abs(bestRwy.headwindKt))}`;
+                            if (bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt < 0) {
+                                tailText += `<span style="color: #9b59b6; font-weight: bold;">G${Math.round(Math.abs(bestRwy.gustHeadwindKt))}</span>`;
+                            }
+                            tailText += 'kt';
+                            tooltipContent += ` | <span style="color: ${tailColor};">${tailText}</span>`;
+                        } else {
+                            let headText = `Headwind: ${Math.round(bestRwy.headwindKt)}`;
+                            if (bestRwy.gustHeadwindKt && bestRwy.gustHeadwindKt >= 0) {
+                                headText += `<span style="color: #9b59b6; font-weight: bold;">G${Math.round(bestRwy.gustHeadwindKt)}</span>`;
+                            }
+                            headText += 'kt';
+                            tooltipContent += ` | <span style="color: #2ecc71;">${headText}</span>`;
+                        }
+                        tooltipContent += '</div>';
+                    }
+                }
             }
 
             // Add navigation data if not departure
@@ -1611,8 +2435,13 @@
         font-size: 32px;
     }
 
-    .btn-browse {
+    .drop-zone-buttons {
+        display: flex;
+        gap: 8px;
         margin-top: 8px;
+    }
+
+    .btn-browse {
         padding: 6px 16px;
         background: #3498db;
         border: none;
@@ -1626,6 +2455,20 @@
         }
     }
 
+    .btn-new {
+        padding: 6px 16px;
+        background: #27ae60;
+        border: none;
+        border-radius: 4px;
+        color: white;
+        cursor: pointer;
+        font-size: 13px;
+
+        &:hover {
+            background: #219a52;
+        }
+    }
+
     .flight-plan-loaded {
         display: flex;
         align-items: center;
@@ -1636,6 +2479,27 @@
     .plan-name {
         font-weight: 500;
         color: #3498db;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 4px;
+        transition: background 0.2s;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+    }
+
+    .plan-name-input {
+        flex: 1;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #3498db;
+        border-radius: 4px;
+        color: #3498db;
+        font-size: 14px;
+        font-weight: 500;
+        padding: 4px 8px;
+        outline: none;
+        min-width: 0;
     }
 
     .btn-clear {
@@ -1808,6 +2672,173 @@
         }
     }
 
+    /* AirportDB Search Section */
+    .search-section {
+        margin: 10px;
+    }
+
+    .btn-search-toggle {
+        width: 100%;
+        padding: 10px 15px;
+        background: rgba(52, 152, 219, 0.2);
+        border: 1px solid rgba(52, 152, 219, 0.5);
+        border-radius: 6px;
+        color: rgba(255, 255, 255, 0.9);
+        cursor: pointer;
+        font-size: 13px;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(52, 152, 219, 0.3);
+        }
+
+        &.active {
+            background: rgba(52, 152, 219, 0.4);
+            border-color: #3498db;
+        }
+    }
+
+    .search-panel {
+        margin-top: 10px;
+        padding: 10px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 6px;
+    }
+
+    .search-input-row {
+        display: flex;
+        gap: 6px;
+    }
+
+    .search-input {
+        flex: 1;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: white;
+        font-size: 13px;
+
+        &::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        &:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+    }
+
+    .btn-search {
+        padding: 8px 12px;
+        background: rgba(52, 152, 219, 0.3);
+        border: 1px solid #3498db;
+        border-radius: 4px;
+        color: white;
+        cursor: pointer;
+        font-size: 14px;
+
+        &:hover:not(:disabled) {
+            background: rgba(52, 152, 219, 0.5);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .search-error {
+        margin-top: 8px;
+        padding: 6px 8px;
+        background: rgba(231, 76, 60, 0.2);
+        border-radius: 4px;
+        color: #e74c3c;
+        font-size: 11px;
+    }
+
+    .search-hint {
+        margin-top: 8px;
+        padding: 8px;
+        background: rgba(52, 152, 219, 0.1);
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 11px;
+        text-align: center;
+    }
+
+    .search-results {
+        margin-top: 8px;
+        max-height: 200px;
+        overflow-y: auto;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+    .search-result-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+        transition: background 0.15s;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+
+        &:hover {
+            background: rgba(52, 152, 219, 0.2);
+        }
+
+        &:last-child {
+            border-bottom: none;
+        }
+    }
+
+    .result-icon {
+        font-size: 14px;
+        flex-shrink: 0;
+    }
+
+    .result-id {
+        font-weight: 600;
+        color: #3498db;
+        font-size: 12px;
+        min-width: 45px;
+    }
+
+    .result-name {
+        flex: 1;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.8);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .result-type {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+        flex-shrink: 0;
+    }
+
+    .btn-add-result {
+        padding: 2px 8px;
+        background: rgba(39, 174, 96, 0.3);
+        border: 1px solid #27ae60;
+        border-radius: 3px;
+        color: white;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+
+        &:hover {
+            background: rgba(39, 174, 96, 0.5);
+        }
+    }
+
+    .api-key-input {
+        font-family: monospace;
+    }
+
     .weather-error {
         margin: 0 10px 10px;
         padding: 8px;
@@ -1889,6 +2920,29 @@
         font-weight: 500;
     }
 
+    .wp-name-text {
+        cursor: pointer;
+        padding: 2px 4px;
+        border-radius: 3px;
+        transition: background 0.2s;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+    }
+
+    .wp-name-input {
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #3498db;
+        border-radius: 3px;
+        color: white;
+        font-size: 13px;
+        font-weight: 500;
+        padding: 2px 6px;
+        width: 120px;
+        outline: none;
+    }
+
     .wp-type-icon {
         font-size: 14px;
     }
@@ -1908,6 +2962,119 @@
         margin-top: 4px;
         font-size: 10px;
         color: rgba(255, 255, 255, 0.7);
+    }
+
+    .wp-runway {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 4px;
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.8);
+        background: rgba(52, 152, 219, 0.15);
+        padding: 3px 6px;
+        border-radius: 4px;
+        align-items: center;
+
+        .rwy-label {
+            font-size: 11px;
+        }
+
+        .rwy-best {
+            font-weight: 600;
+            color: #3498db;
+        }
+
+        .rwy-xwind {
+            &.warning {
+                color: #f39c12;
+            }
+            &.danger {
+                color: #e74c3c;
+                font-weight: 600;
+            }
+        }
+
+        .rwy-headwind {
+            color: #2ecc71;
+        }
+
+        .rwy-tailwind {
+            color: #e67e22;
+            &.warning {
+                color: #e74c3c;
+            }
+        }
+
+        .rwy-gust {
+            color: #9b59b6;
+            font-weight: 500;
+            &.warning {
+                color: #f39c12;
+            }
+            &.danger {
+                color: #e74c3c;
+                font-weight: 600;
+            }
+        }
+
+        .gust-component {
+            color: #9b59b6;
+            font-weight: 600;
+            margin-left: 1px;
+        }
+    }
+
+    .wp-altitude {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 4px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.7);
+    }
+
+    .altitude-label {
+        font-size: 12px;
+    }
+
+    .wp-altitude-text {
+        cursor: pointer;
+        padding: 1px 4px;
+        border-radius: 3px;
+        transition: background 0.2s;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        &.is-custom {
+            color: #3498db;
+            font-weight: 500;
+        }
+    }
+
+    .wp-altitude-input {
+        width: 70px;
+        background: rgba(0, 0, 0, 0.3);
+        border: 1px solid #3498db;
+        border-radius: 3px;
+        color: white;
+        font-size: 11px;
+        padding: 2px 4px;
+        outline: none;
+        -moz-appearance: textfield;
+
+        &::-webkit-outer-spin-button,
+        &::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+    }
+
+    .altitude-unit {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
     }
 
     .wx-wind, .wx-temp, .wx-cloud {
