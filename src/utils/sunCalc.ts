@@ -272,13 +272,17 @@ export function getSunTimes(lat: number, lon: number, date: Date): { sunrise: Da
     return { sunrise, sunset };
 }
 
+// VFR buffer: 30 minutes before sunrise and after sunset (typical VFR regulations)
+const VFR_BUFFER_MS = 30 * 60 * 1000;
+
 /**
- * Filter a time range to only include daylight hours
+ * Filter a time range to only include VFR daylight hours
+ * Includes 30 minutes before sunrise and 30 minutes after sunset per typical VFR regulations
  * @param startTime - Start timestamp in milliseconds
  * @param endTime - End timestamp in milliseconds
  * @param lat - Latitude in degrees
  * @param lon - Longitude in degrees
- * @returns Array of daylight time ranges within the original range
+ * @returns Array of VFR daylight time ranges within the original range
  */
 export function filterToDaylightHours(
     startTime: number,
@@ -321,9 +325,12 @@ export function filterToDaylightHours(
             continue;
         }
 
-        // Calculate daylight window for this day
-        const dayLightStart = Math.max(startTime, sunTimes.sunrise.getTime());
-        const dayLightEnd = Math.min(endTime, sunTimes.sunset.getTime());
+        // Calculate VFR daylight window for this day (30 min before sunrise to 30 min after sunset)
+        const vfrStart = sunTimes.sunrise.getTime() - VFR_BUFFER_MS;
+        const vfrEnd = sunTimes.sunset.getTime() + VFR_BUFFER_MS;
+
+        const dayLightStart = Math.max(startTime, vfrStart);
+        const dayLightEnd = Math.min(endTime, vfrEnd);
 
         // Only add if there's a valid daylight period
         if (dayLightStart < dayLightEnd) {
