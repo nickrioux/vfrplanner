@@ -4,6 +4,7 @@
  */
 
 import type { FlightPlan, Waypoint } from '../types/flightPlan';
+import { feetToMeters } from '../utils/units';
 
 /**
  * Convert a flight plan to GPX XML string
@@ -79,10 +80,6 @@ function getGpxSymbol(type: string): string {
         case 'USER WAYPOINT':
         default: return 'Flag, Blue';
     }
-}
-
-function feetToMeters(feet: number): number {
-    return feet * 0.3048;
 }
 
 function escapeXml(str: string): string {
