@@ -187,10 +187,11 @@ export function validateFPL(flightPlan: FPLFlightPlan): FPLValidationResult {
                 field: `waypointTable[${i}].identifier`,
                 message: 'Waypoint identifier is required',
             });
-        } else if (wp.identifier.length > 12) {
+        } else if (wp.identifier.length > 30) {
+            // ForeFlight uses coordinate-based names like "25.97223N/80.60382W" (up to ~22 chars)
             errors.push({
                 field: `waypointTable[${i}].identifier`,
-                message: 'Waypoint identifier must be 12 characters or less',
+                message: 'Waypoint identifier must be 30 characters or less',
                 value: wp.identifier,
             });
         }
@@ -242,6 +243,16 @@ function generateWaypointId(identifier: string, index: number): string {
 }
 
 /**
+ * Check if a waypoint identifier is a coordinate-based name
+ * ForeFlight uses formats like "22.64371N/84.5998W" for user waypoints
+ */
+function isCoordinateIdentifier(identifier: string): boolean {
+    // Pattern: digits with optional decimal, N/S, slash, digits with optional decimal, E/W
+    const coordinatePattern = /^\d+\.?\d*[NS]\/\d+\.?\d*[EW]$/i;
+    return coordinatePattern.test(identifier);
+}
+
+/**
  * Convert FPL flight plan to internal FlightPlan format
  */
 export function convertToFlightPlan(fpl: FPLFlightPlan, filename?: string): FlightPlan {
@@ -262,16 +273,28 @@ export function convertToFlightPlan(fpl: FPLFlightPlan, filename?: string): Flig
     }
 
     // Convert to internal Waypoint format
-    const waypoints: Waypoint[] = orderedWaypoints.map((fplWp, index) => ({
-        id: generateWaypointId(fplWp.identifier, index),
-        name: fplWp.identifier,
-        type: fplWp.type,
-        lat: fplWp.lat,
-        lon: fplWp.lon,
-        comment: fplWp.comment,
-        elevation: fplWp.elevation,
-        countryCode: fplWp.countryCode || undefined,
-    }));
+    // Replace coordinate-based identifiers with USR0, USR1, etc.
+    let usrCounter = 0;
+    const waypoints: Waypoint[] = orderedWaypoints.map((fplWp, index) => {
+        let displayName = fplWp.identifier;
+
+        // Replace coordinate-based names with USRn
+        if (isCoordinateIdentifier(fplWp.identifier)) {
+            displayName = `USR${usrCounter}`;
+            usrCounter++;
+        }
+
+        return {
+            id: generateWaypointId(fplWp.identifier, index),
+            name: displayName,
+            type: fplWp.type,
+            lat: fplWp.lat,
+            lon: fplWp.lon,
+            comment: fplWp.comment || fplWp.identifier, // Store original identifier in comment if coordinate-based
+            elevation: fplWp.elevation,
+            countryCode: fplWp.countryCode || undefined,
+        };
+    });
 
     // Generate flight plan name
     const planName = fpl.route?.name
@@ -297,31 +320,77 @@ export function convertToFlightPlan(fpl: FPLFlightPlan, filename?: string): Flig
 }
 
 /**
+ * Detect file encoding from BOM (Byte Order Mark)
+ * Returns the encoding name for FileReader.readAsText()
+ */
+function detectEncoding(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer.slice(0, 4));
+
+    // UTF-16 LE BOM: 0xFF 0xFE
+    if (bytes[0] === 0xFF && bytes[1] === 0xFE) {
+        return 'utf-16le';
+    }
+    // UTF-16 BE BOM: 0xFE 0xFF
+    if (bytes[0] === 0xFE && bytes[1] === 0xFF) {
+        return 'utf-16be';
+    }
+    // UTF-8 BOM: 0xEF 0xBB 0xBF (or no BOM, default to UTF-8)
+    return 'utf-8';
+}
+
+/**
  * Read and parse an FPL file from a File object
+ * Handles both UTF-8 and UTF-16 encoded files (ForeFlight exports UTF-16)
  */
 export async function readFPLFile(file: File): Promise<FPLParseResult> {
     return new Promise((resolve) => {
-        const reader = new FileReader();
+        // First, read as ArrayBuffer to detect encoding
+        const encodingReader = new FileReader();
 
-        reader.onload = (event) => {
-            const content = event.target?.result;
-            if (typeof content === 'string') {
-                resolve(parseFPL(content));
-            } else {
+        encodingReader.onload = (event) => {
+            const buffer = event.target?.result as ArrayBuffer;
+            if (!buffer) {
                 resolve({
                     success: false,
                     error: 'Failed to read file content',
                 });
+                return;
             }
+
+            const encoding = detectEncoding(buffer);
+
+            // Now read with the correct encoding
+            const textReader = new FileReader();
+
+            textReader.onload = (textEvent) => {
+                const content = textEvent.target?.result;
+                if (typeof content === 'string') {
+                    resolve(parseFPL(content));
+                } else {
+                    resolve({
+                        success: false,
+                        error: 'Failed to read file content',
+                    });
+                }
+            };
+
+            textReader.onerror = () => {
+                resolve({
+                    success: false,
+                    error: 'Failed to read file',
+                });
+            };
+
+            textReader.readAsText(file, encoding);
         };
 
-        reader.onerror = () => {
+        encodingReader.onerror = () => {
             resolve({
                 success: false,
                 error: 'Failed to read file',
             });
         };
 
-        reader.readAsText(file);
+        encodingReader.readAsArrayBuffer(file);
     });
 }
