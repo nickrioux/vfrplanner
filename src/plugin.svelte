@@ -248,6 +248,64 @@
                             🔗 {syncWithWindy ? 'Synced' : 'Sync'}
                         </button>
                     </div>
+
+                    <!-- VFR Window Detection -->
+                    <div class="vfr-window-section">
+                        <div class="vfr-window-controls">
+                            <select
+                                class="condition-select"
+                                bind:value={windowSearchMinCondition}
+                                disabled={isSearchingWindows}
+                            >
+                                <option value="marginal">Marginal or better</option>
+                                <option value="good">Good only</option>
+                            </select>
+                            <button
+                                class="btn-find-windows"
+                                on:click={handleFindVFRWindows}
+                                disabled={isSearchingWindows || !flightPlan || flightPlan.waypoints.length < 2}
+                            >
+                                {#if isSearchingWindows}
+                                    Searching... {Math.round(windowSearchProgress * 100)}%
+                                {:else}
+                                    🔍 Find VFR Windows
+                                {/if}
+                            </button>
+                        </div>
+
+                        {#if isSearchingWindows}
+                            <div class="search-progress">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" style="width: {windowSearchProgress * 100}%"></div>
+                                </div>
+                            </div>
+                        {/if}
+
+                        {#if windowSearchError}
+                            <div class="window-error">{windowSearchError}</div>
+                        {/if}
+
+                        {#if vfrWindows && vfrWindows.length > 0}
+                            <div class="vfr-windows-list">
+                                {#each vfrWindows as window}
+                                    {@const formatted = formatVFRWindow(window)}
+                                    <div class="vfr-window-item" class:good={window.worstCondition === 'good'} class:marginal={window.worstCondition === 'marginal'}>
+                                        <div class="window-info">
+                                            <span class="window-date">{formatted.date}</span>
+                                            <span class="window-time">{formatted.timeRange}</span>
+                                            <span class="window-meta">
+                                                <span class="window-duration">{formatted.duration}</span>
+                                                <span class="window-confidence" class:high={window.confidence === 'high'} class:medium={window.confidence === 'medium'} class:low={window.confidence === 'low'}>
+                                                    {window.confidence === 'high' ? '●' : window.confidence === 'medium' ? '◐' : '○'}
+                                                </span>
+                                            </span>
+                                        </div>
+                                        <button class="btn-use-window" on:click={() => useVFRWindow(window)}>Use</button>
+                                    </div>
+                                {/each}
+                            </div>
+                        {/if}
+                    </div>
                 </div>
             {/if}
         {/if}
@@ -322,7 +380,7 @@
                                                 }
                                             }}
                                         >
-                                            ☁️ {wx.cloudBaseDisplay ?? 'N/A'}
+                                            ☁️ {wx.cloudBaseDisplay ?? 'CLR'}
                                         </span>
                                     </div>
                                     <!-- Best runway info for terminal waypoints -->
@@ -611,6 +669,8 @@
         type ForecastTimeRange,
     } from './services/weatherService';
     import { calculateProfileData, findBestRunway, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { findVFRWindows, formatVFRWindow, type VFRWindow, type VFRWindowSearchResult } from './services/vfrWindowService';
+    import type { MinimumConditionLevel, VFRWindowCSVData } from './types/vfrWindow';
     import { fetchRouteElevationProfile, fetchPointElevation, type ElevationPoint } from './services/elevationService';
     import {
         searchAirport,
@@ -668,6 +728,38 @@
     let syncWithWindy: boolean = true;
     let isUpdatingFromWindy: boolean = false;
     let isUpdatingToWindy: boolean = false;
+
+    // VFR Window detection state
+    let isSearchingWindows = false;
+    let windowSearchProgress = 0;
+    let windowSearchMinCondition: MinimumConditionLevel = 'marginal';
+    let vfrWindows: VFRWindow[] | null = null;
+    let windowSearchError: string | null = null;
+
+    /**
+     * Reset route panel state when flight plan changes
+     * Clears weather data, VFR windows, and related state
+     */
+    function resetRoutePanel() {
+        // Clear weather state
+        weatherData = new Map();
+        weatherAlerts = new Map();
+        weatherError = null;
+        forecastRange = null;
+
+        // Clear VFR window state
+        vfrWindows = null;
+        windowSearchError = null;
+        windowSearchProgress = 0;
+        isSearchingWindows = false;
+
+        // Reset departure time to now
+        departureTime = Date.now();
+
+        if (settings.enableLogging) {
+            console.log('[VFR Planner] Route panel state reset');
+        }
+    }
 
     // Settings
     let settings: PluginSettings = { ...DEFAULT_SETTINGS };
@@ -808,23 +900,37 @@
             }
 
             // Fetch runway data for departure/arrival airports (if API key available)
-            console.log(`[VFR Runway Debug] API key present: ${!!settings.airportdbApiKey}, waypoints: ${plan.waypoints.length}`);
+            if (settings.enableLogging) {
+                console.log(`[VFR Runway Debug] API key present: ${!!settings.airportdbApiKey}, waypoints: ${plan.waypoints.length}`);
+            }
             if (settings.airportdbApiKey && plan.waypoints.length >= 1) {
                 // Fetch departure runway data
                 const departureWp = plan.waypoints[0];
-                console.log(`[VFR Runway Debug] Departure: ${departureWp.name}, type: ${departureWp.type}, hasRunways: ${!!departureWp.runways}`);
+                if (settings.enableLogging) {
+                    console.log(`[VFR Runway Debug] Departure: ${departureWp.name}, type: ${departureWp.type}, hasRunways: ${!!departureWp.runways}`);
+                }
                 if (departureWp.type === 'AIRPORT' && !departureWp.runways) {
                     try {
-                        console.log(`[VFR Runway Debug] Fetching runway data for ${departureWp.name}...`);
+                        if (settings.enableLogging) {
+                            console.log(`[VFR Runway Debug] Fetching runway data for ${departureWp.name}...`);
+                        }
                         const airportData = await getAirportByICAO(departureWp.name, settings.airportdbApiKey);
-                        console.log(`[VFR Runway Debug] AirportDB response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                        if (settings.enableLogging) {
+                            console.log(`[VFR Runway Debug] AirportDB response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                        }
                         if (airportData?.runways && airportData.runways.length > 0) {
-                            console.log(`[VFR Runway Debug] Raw runways for ${departureWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Runway Debug] Raw runways for ${departureWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                            }
                             // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
                             const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
-                            console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                            }
                             const runways = filteredRunways.map(rwy => {
-                                console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                if (settings.enableLogging) {
+                                    console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                }
                                 return {
                                     id: rwy.id,
                                     lengthFt: rwy.length_ft,
@@ -836,31 +942,49 @@
                                     highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
                                 };
                             });
-                            console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                            }
                             plan.waypoints[0] = { ...plan.waypoints[0], runways };
-                            console.log(`[VFR Planner] Loaded ${runways.length} runways for departure ${departureWp.name}`);
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Planner] Loaded ${runways.length} runways for departure ${departureWp.name}`);
+                            }
                         }
                     } catch (err) {
-                        console.warn(`[VFR Planner] Could not fetch runway data for ${departureWp.name}:`, err);
+                        if (settings.enableLogging) {
+                            console.warn(`[VFR Planner] Could not fetch runway data for ${departureWp.name}:`, err);
+                        }
                     }
                 }
 
                 // Fetch arrival runway data (if different from departure)
                 if (plan.waypoints.length >= 2) {
                     const arrivalWp = plan.waypoints[plan.waypoints.length - 1];
-                    console.log(`[VFR Runway Debug] Arrival: ${arrivalWp.name}, type: ${arrivalWp.type}, hasRunways: ${!!arrivalWp.runways}`);
+                    if (settings.enableLogging) {
+                        console.log(`[VFR Runway Debug] Arrival: ${arrivalWp.name}, type: ${arrivalWp.type}, hasRunways: ${!!arrivalWp.runways}`);
+                    }
                     if (arrivalWp.type === 'AIRPORT' && !arrivalWp.runways && arrivalWp.name !== plan.waypoints[0].name) {
                         try {
-                            console.log(`[VFR Runway Debug] Fetching runway data for ${arrivalWp.name}...`);
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Runway Debug] Fetching runway data for ${arrivalWp.name}...`);
+                            }
                             const airportData = await getAirportByICAO(arrivalWp.name, settings.airportdbApiKey);
-                            console.log(`[VFR Runway Debug] AirportDB response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                            if (settings.enableLogging) {
+                                console.log(`[VFR Runway Debug] AirportDB response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                            }
                             if (airportData?.runways && airportData.runways.length > 0) {
-                                console.log(`[VFR Runway Debug] Raw runways for ${arrivalWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                                if (settings.enableLogging) {
+                                    console.log(`[VFR Runway Debug] Raw runways for ${arrivalWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
+                                }
                                 // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
                                 const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
-                                console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                                if (settings.enableLogging) {
+                                    console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
+                                }
                                 const runways = filteredRunways.map(rwy => {
-                                    console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                    if (settings.enableLogging) {
+                                        console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
+                                    }
                                     return {
                                         id: rwy.id,
                                         lengthFt: rwy.length_ft,
@@ -872,12 +996,18 @@
                                         highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
                                     };
                                 });
-                                console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                                if (settings.enableLogging) {
+                                    console.log(`[VFR Runway Debug] Final runways array:`, runways);
+                                }
                                 plan.waypoints[plan.waypoints.length - 1] = { ...plan.waypoints[plan.waypoints.length - 1], runways };
-                                console.log(`[VFR Planner] Loaded ${runways.length} runways for arrival ${arrivalWp.name}`);
+                                if (settings.enableLogging) {
+                                    console.log(`[VFR Planner] Loaded ${runways.length} runways for arrival ${arrivalWp.name}`);
+                                }
                             }
                         } catch (err) {
-                            console.warn(`[VFR Planner] Could not fetch runway data for ${arrivalWp.name}:`, err);
+                            if (settings.enableLogging) {
+                                console.warn(`[VFR Planner] Could not fetch runway data for ${arrivalWp.name}:`, err);
+                            }
                         }
                     }
                 }
@@ -890,6 +1020,9 @@
                 waypoints: navResult.waypoints,
                 totals: navResult.totals,
             };
+
+            // Reset route panel state before loading new plan
+            resetRoutePanel();
 
             flightPlan = plan;
             updateMapLayers();
@@ -908,11 +1041,7 @@
         error = null;
         isAddingWaypoint = false;
         activeTab = 'route';
-        weatherData = new Map();
-        weatherAlerts = new Map();
-        weatherError = null;
-        forecastRange = null;
-        departureTime = Date.now();
+        resetRoutePanel();
         clearMapLayers();
         saveSession();
     }
@@ -941,9 +1070,7 @@
         // Clear any previous state
         selectedWaypointId = null;
         error = null;
-        weatherData = new Map();
-        weatherAlerts = new Map();
-        weatherError = null;
+        resetRoutePanel();
 
         // Enable waypoint adding mode immediately
         isAddingWaypoint = true;
@@ -1657,22 +1784,24 @@
 
             weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
 
-            console.log(`[VFR Debug] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
-            if (weatherData.size > 0) {
-                console.log(`[VFR Debug] Weather data keys:`, Array.from(weatherData.keys()));
-                // Log detailed weather for each waypoint
-                weatherData.forEach((wx, waypointId) => {
-                    const wp = flightPlan?.waypoints.find(w => w.id === waypointId);
-                    console.log(`[VFR Debug] Weather for ${wp?.name || waypointId}:`, {
-                        wind: `${Math.round(wx.windDir)}° @ ${Math.round(wx.windSpeed)} kt`,
-                        gust: wx.windGust ? `${Math.round(wx.windGust)} kt` : 'none',
-                        temp: `${Math.round(wx.temperature)}°C`,
-                        cloudBase: wx.cloudBase ? `${Math.round(wx.cloudBase)}m AGL` : 'clear',
-                        visibility: wx.visibility ? `${wx.visibility.toFixed(1)} km` : 'N/A',
-                        pressure: wx.pressure ? `${Math.round(wx.pressure)} hPa` : 'N/A',
-                        windAltitude: wx.windAltitude ? `${wx.windAltitude} ft` : 'surface'
+            if (settings.enableLogging) {
+                console.log(`[VFR Debug] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
+                if (weatherData.size > 0) {
+                    console.log(`[VFR Debug] Weather data keys:`, Array.from(weatherData.keys()));
+                    // Log detailed weather for each waypoint
+                    weatherData.forEach((wx, waypointId) => {
+                        const wp = flightPlan?.waypoints.find(w => w.id === waypointId);
+                        console.log(`[VFR Debug] Weather for ${wp?.name || waypointId}:`, {
+                            wind: `${Math.round(wx.windDir)}° @ ${Math.round(wx.windSpeed)} kt`,
+                            gust: wx.windGust ? `${Math.round(wx.windGust)} kt` : 'none',
+                            temp: `${Math.round(wx.temperature)}°C`,
+                            cloudBase: wx.cloudBase ? `${Math.round(wx.cloudBase)}m AGL` : 'clear',
+                            visibility: wx.visibility ? `${wx.visibility.toFixed(1)} km` : 'N/A',
+                            pressure: wx.pressure ? `${Math.round(wx.pressure)} hPa` : 'N/A',
+                            windAltitude: wx.windAltitude ? `${wx.windAltitude} ft` : 'surface'
+                        });
                     });
-                });
+                }
             }
 
             // Check for alerts at each waypoint
@@ -1966,6 +2095,196 @@
         saveSession();
     }
 
+    /**
+     * Download VFR window search data as CSV (pivoted: one row per departure time)
+     */
+    function downloadVFRWindowCSV(csvData: VFRWindowCSVData) {
+        // Helper to format timestamp in Eastern timezone (ISO-like format without comma)
+        const formatEastern = (ts: number): string => {
+            const d = new Date(ts);
+            const options: Intl.DateTimeFormatOptions = {
+                timeZone: 'America/New_York',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+            };
+            const parts = new Intl.DateTimeFormat('en-US', options).formatToParts(d);
+            const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+            // Format as YYYY-MM-DD HH:MM (no comma, easy to parse)
+            return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}`;
+        };
+
+        // Group rows by departure time
+        const byDepartureTime = new Map<number, typeof csvData.rows>();
+        for (const row of csvData.rows) {
+            if (!byDepartureTime.has(row.departureTime)) {
+                byDepartureTime.set(row.departureTime, []);
+            }
+            byDepartureTime.get(row.departureTime)!.push(row);
+        }
+
+        // Get unique waypoint names in order
+        const firstGroup = byDepartureTime.values().next().value;
+        if (!firstGroup || firstGroup.length === 0) return;
+        const waypointNames = firstGroup.map((r: typeof csvData.rows[0]) => r.waypointName);
+
+        // Build header: DepartureTime_ET, then for each waypoint: WP_Arrival_ET, WP_Wind, WP_Cbase_ft, WP_Condition, WP_Reasons
+        const headers = ['DepartureTime_ET'];
+        for (const wpName of waypointNames) {
+            headers.push(
+                `${wpName}_Arrival_ET`,
+                `${wpName}_Wind_kt`,
+                `${wpName}_WindDir`,
+                `${wpName}_Gust_kt`,
+                `${wpName}_Temp_C`,
+                `${wpName}_Cbase_ft`,
+                `${wpName}_Vis_m`,
+                `${wpName}_Condition`,
+                `${wpName}_Reasons`
+            );
+        }
+
+        // Build rows
+        const rows: string[] = [];
+        for (const [depTime, waypointRows] of byDepartureTime) {
+            const rowData: string[] = [formatEastern(depTime)];
+
+            // Sort waypoints by index to ensure correct order
+            waypointRows.sort((a, b) => a.waypointIndex - b.waypointIndex);
+
+            for (const wp of waypointRows) {
+                rowData.push(
+                    formatEastern(wp.arrivalTime),
+                    wp.windSpeed.toFixed(0),
+                    wp.windDir.toFixed(0),
+                    wp.windGust?.toFixed(0) ?? '',
+                    wp.temperature.toFixed(1),
+                    wp.cloudBaseFt?.toFixed(0) ?? '',
+                    wp.visibility?.toFixed(0) ?? '',
+                    wp.condition,
+                    `"${wp.conditionReasons.replace(/"/g, '""')}"`
+                );
+            }
+            rows.push(rowData.join(','));
+        }
+
+        // Add metadata as comments
+        const metadata = [
+            `# VFR Window Search - Generated: ${csvData.generatedAt}`,
+            `# Search Range: ${csvData.searchRange.start} to ${csvData.searchRange.end}`,
+            `# Minimum Condition: ${csvData.minimumCondition}`,
+            `# Times shown in Eastern Time (America/New_York)`,
+            '',
+        ];
+
+        const csvContent = [...metadata, headers.join(','), ...rows].join('\n');
+
+        // Create and trigger download
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `vfr-window-search-${new Date().toISOString().slice(0, 19).replace(/[:-]/g, '')}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+
+        if (settings.enableLogging) {
+            console.log(`[VFR Planner] CSV exported with ${byDepartureTime.size} departure times, ${waypointNames.length} waypoints`);
+        }
+    }
+
+    /**
+     * Find VFR windows where conditions are acceptable along the entire route
+     */
+    async function handleFindVFRWindows() {
+        if (!flightPlan || flightPlan.waypoints.length < 2) {
+            windowSearchError = 'Need at least 2 waypoints to search for VFR windows';
+            return;
+        }
+
+        if (flightPlan.totals.ete <= 0) {
+            windowSearchError = 'Cannot search without valid flight time (ETE)';
+            return;
+        }
+
+        isSearchingWindows = true;
+        windowSearchProgress = 0;
+        windowSearchError = null;
+        vfrWindows = null;
+
+        try {
+            const result = await findVFRWindows(
+                flightPlan.waypoints,
+                flightPlan.aircraft.defaultAltitude,
+                flightPlan.totals.ete,
+                {
+                    minimumCondition: windowSearchMinCondition,
+                    maxConcurrent: 4,
+                    maxWindows: 5,
+                    startFrom: departureTime, // Start search from current departure time
+                    collectDetailedData: settings.enableLogging, // Collect for CSV export only when debug logging enabled
+                },
+                (progress) => {
+                    windowSearchProgress = progress;
+                },
+                settings.enableLogging
+            );
+
+            vfrWindows = result.windows;
+
+            if (result.windows.length === 0) {
+                if (result.limitedBy) {
+                    windowSearchError = result.limitedBy;
+                } else {
+                    windowSearchError = `No ${windowSearchMinCondition === 'good' ? 'good' : 'acceptable'} VFR windows found in forecast period`;
+                }
+            }
+
+            // Export CSV data if available and debug logging is enabled
+            if (settings.enableLogging && result.csvData) {
+                downloadVFRWindowCSV(result.csvData);
+            }
+
+            if (settings.enableLogging) {
+                console.log('[VFR Planner] VFR window search complete:', result);
+            }
+        } catch (err) {
+            console.error('[VFR Planner] Error searching for VFR windows:', err);
+            windowSearchError = err instanceof Error ? err.message : 'Error searching for VFR windows';
+        } finally {
+            isSearchingWindows = false;
+        }
+    }
+
+    /**
+     * Use a found VFR window by setting the departure time to its start
+     */
+    async function useVFRWindow(window: VFRWindow) {
+        departureTime = window.startTime;
+
+        // Update Windy's timeline to show weather at this time on the map
+        // Set flag to avoid triggering handleWindyTimestampChange feedback loop
+        isUpdatingToWindy = true;
+        try {
+            store.set('timestamp', window.startTime);
+        } finally {
+            setTimeout(() => {
+                isUpdatingToWindy = false;
+            }, 100);
+        }
+
+        // Refresh weather data for the route panel with the new departure time
+        if (flightPlan) {
+            await handleReadWeather();
+            saveSession();
+        }
+    }
+
     // Map layer management
     function updateMapLayers() {
         if (settings.enableLogging) {
@@ -2109,7 +2428,7 @@
                     tooltipContent += ` <span style="font-size: 9px; color: #888;">(${wx.windLevel})</span>`;
                 }
                 tooltipContent += ` | 🌡️ ${formatTemperature(wx.temperature)}`;
-                tooltipContent += ` | ☁️ ${wx.cloudBaseDisplay ?? 'N/A'}`;
+                tooltipContent += ` | ☁️ ${wx.cloudBaseDisplay ?? 'CLR'}`;
                 tooltipContent += '</div>';
 
                 // Add vertical wind profile if available
@@ -2632,6 +2951,170 @@
         &.active {
             background: rgba(39, 174, 96, 0.3);
             color: #27ae60;
+        }
+    }
+
+    /* VFR Window Detection */
+    .vfr-window-section {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .vfr-window-controls {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .condition-select {
+        flex: 0 0 auto;
+        padding: 6px 8px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.9);
+        font-size: 11px;
+        cursor: pointer;
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .btn-find-windows {
+        flex: 1;
+        padding: 6px 10px;
+        background: rgba(52, 152, 219, 0.3);
+        border: 1px solid rgba(52, 152, 219, 0.5);
+        border-radius: 4px;
+        color: #3498db;
+        cursor: pointer;
+        font-size: 11px;
+        transition: all 0.15s ease;
+
+        &:hover:not(:disabled) {
+            background: rgba(52, 152, 219, 0.4);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .search-progress {
+        margin-top: 8px;
+    }
+
+    .progress-bar {
+        height: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+        overflow: hidden;
+    }
+
+    .progress-fill {
+        height: 100%;
+        background: #3498db;
+        transition: width 0.2s ease;
+    }
+
+    .window-error {
+        margin-top: 8px;
+        padding: 6px 8px;
+        background: rgba(231, 76, 60, 0.2);
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 11px;
+    }
+
+    .vfr-windows-list {
+        margin-top: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .vfr-window-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 4px;
+        border-left: 3px solid #757575;
+
+        &.good {
+            border-left-color: #4caf50;
+            background: rgba(76, 175, 80, 0.1);
+        }
+
+        &.marginal {
+            border-left-color: #ff9800;
+            background: rgba(255, 152, 0, 0.1);
+        }
+    }
+
+    .window-info {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    .window-date {
+        font-size: 11px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.95);
+    }
+
+    .window-time {
+        font-size: 12px;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.8);
+    }
+
+    .window-meta {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+
+    .window-duration {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.6);
+    }
+
+    .window-confidence {
+        font-size: 10px;
+        color: rgba(255, 255, 255, 0.5);
+
+        &.high {
+            color: #4caf50;
+        }
+
+        &.medium {
+            color: #ff9800;
+        }
+
+        &.low {
+            color: #f44336;
+        }
+    }
+
+    .btn-use-window {
+        padding: 4px 12px;
+        background: rgba(52, 152, 219, 0.3);
+        border: 1px solid rgba(52, 152, 219, 0.5);
+        border-radius: 4px;
+        color: #3498db;
+        cursor: pointer;
+        font-size: 11px;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(52, 152, 219, 0.5);
         }
     }
 
