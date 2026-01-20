@@ -10,6 +10,7 @@ import type { DataHash, WeatherDataPayload } from '@windy/interfaces';
 import type { Products } from '@windy/rootScope';
 import type { HttpPayload } from '@windy/http';
 import type { Waypoint } from '../types/flightPlan';
+import { metersToFeet, msToKnots, kelvinToCelsius } from '../utils/units';
 
 /** Wind data at a specific pressure level */
 export interface LevelWind {
@@ -62,27 +63,6 @@ export const DEFAULT_ALERT_THRESHOLDS: WeatherAlertThresholds = {
     cloudBase: 1500,
     precipitation: 5,
 };
-
-/**
- * Convert m/s to knots
- */
-function msToKnots(ms: number): number {
-    return ms * 1.94384;
-}
-
-/**
- * Convert Kelvin to Celsius
- */
-function kelvinToCelsius(k: number): number {
-    return k - 273.15;
-}
-
-/**
- * Convert meters to feet
- */
-function metersToFeet(m: number): number {
-    return m * 3.28084;
-}
 
 /**
  * Pressure level definitions with approximate altitudes

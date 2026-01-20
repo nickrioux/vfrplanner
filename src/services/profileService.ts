@@ -8,13 +8,7 @@ import type { WaypointWeather, LevelWind } from './weatherService';
 import { calculateHeadwindComponent } from './navigationCalc';
 import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
 import { interpolateWindBetweenWaypoints, interpolateBearing } from '../utils/interpolation';
-
-/**
- * Convert meters to feet
- */
-function metersToFeet(m: number): number {
-    return m * 3.28084;
-}
+import { metersToFeet } from '../utils/units';
 
 /**
  * Estimate cloud top from cloud base

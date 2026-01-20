@@ -16,6 +16,7 @@ import type {
     WaypointEvaluationDetail,
     VFRWindowCSVData,
 } from '../types/vfrWindow';
+import { metersToFeet } from '../utils/units';
 
 /**
  * Weather cache to avoid redundant API calls during search
@@ -49,13 +50,6 @@ class WeatherCache {
     get size(): number {
         return this.cache.size;
     }
-}
-
-/**
- * Convert meters to feet
- */
-function metersToFeet(m: number): number {
-    return m * 3.28084;
 }
 
 /**
