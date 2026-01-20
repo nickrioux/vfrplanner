@@ -235,6 +235,12 @@ export async function fetchVerticalWindData(
                 if (windKeys.length > 0) {
                     console.log(`[VFR Debug] Sample ${windKeys[0]}:`, result.data.data[windKeys[0]]);
                 }
+                // Show cbase-related keys
+                const cbaseKeys = dataKeys.filter(k => k.includes('cbase') || k.includes('cloud'));
+                console.log(`[VFR Debug] Cbase/cloud-related keys:`, cbaseKeys);
+                if (cbaseKeys.length > 0) {
+                    console.log(`[VFR Debug] Sample ${cbaseKeys[0]}:`, result.data.data[cbaseKeys[0]]);
+                }
             }
             console.log(`[VFR Debug] ========================================================`);
         }
@@ -995,10 +1001,64 @@ export async function fetchWaypointWeather(
         const pressureData = responseData['pressure-surface'] || responseData.pressure;
         const rhData = responseData['rh-surface'] || responseData.rh;
         const mmData = responseData['mm-surface'] || responseData.mm;
-        const cbaseData = responseData['cbase-surface'] || responseData.cbase;
 
-        // Get timestamps
-        const timestamps = responseData.ts || responseData['ts-surface'] || [];
+        // Try to get cbase from meteogram data first, then fall back to point forecast
+        let cbaseData: number[] | undefined;
+        let cbaseSource = 'none';
+
+        if (meteogramData) {
+            // Check for cbase in meteogram data (try various possible key names)
+            const meteogramCbase = meteogramData['cbase-surface'] || meteogramData['cbase'] ||
+                                   meteogramData['cloudBase-surface'] || meteogramData['cloudBase'];
+            if (meteogramCbase && Array.isArray(meteogramCbase) && meteogramCbase.length > 0) {
+                cbaseData = meteogramCbase;
+                cbaseSource = 'meteogram';
+                if (enableLogging) {
+                    console.log(`[VFR Debug] Using cbase from MeteogramForecastData for ${waypointName}:`, {
+                        dataLength: cbaseData.length,
+                        sample: cbaseData.slice(0, 5),
+                        allKeys: Object.keys(meteogramData).filter(k => k.includes('cbase') || k.includes('cloud'))
+                    });
+                }
+            }
+        }
+
+        // Fall back to point forecast cbase if meteogram doesn't have it
+        if (!cbaseData) {
+            cbaseData = responseData['cbase-surface'] || responseData.cbase;
+            if (cbaseData) {
+                cbaseSource = 'pointForecast';
+                if (enableLogging) {
+                    console.log(`[VFR Debug] Using cbase from PointForecastData for ${waypointName}:`, {
+                        dataLength: cbaseData?.length,
+                        sample: cbaseData?.slice(0, 5)
+                    });
+                }
+            }
+        }
+
+        if (enableLogging) {
+            console.log(`[VFR Debug] Cbase source for ${waypointName}: ${cbaseSource}`);
+        }
+
+        // Get timestamps - use meteogram timestamps if cbase comes from meteogram
+        let timestamps: number[] = [];
+        let cbaseTimestamps: number[] | undefined;
+
+        if (cbaseSource === 'meteogram' && meteogramData) {
+            // Meteogram has its own timestamps
+            cbaseTimestamps = meteogramData.ts || meteogramData['ts-surface'];
+            timestamps = responseData.ts || responseData['ts-surface'] || cbaseTimestamps || [];
+            if (enableLogging && cbaseTimestamps) {
+                console.log(`[VFR Debug] Meteogram timestamps for ${waypointName}:`, {
+                    count: cbaseTimestamps.length,
+                    first: cbaseTimestamps[0] ? new Date(cbaseTimestamps[0]).toISOString() : 'N/A',
+                    last: cbaseTimestamps[cbaseTimestamps.length - 1] ? new Date(cbaseTimestamps[cbaseTimestamps.length - 1]).toISOString() : 'N/A'
+                });
+            }
+        } else {
+            timestamps = responseData.ts || responseData['ts-surface'] || [];
+        }
 
         if (!timestamps || timestamps.length === 0) {
             if (enableLogging) {
@@ -1065,33 +1125,75 @@ export async function fetchWaypointWeather(
             }
         }
 
-        // Cloud base (from surface level)
+        // Cloud base (from meteogram or surface level)
+        // Use ceiling calculation method setting to determine how to handle forecast data
         let cloudBase: number | undefined;
         let cloudBaseDisplay: string | undefined;
+
+        // Default clear sky value in meters (29999 ft = ~9144 m)
+        const CLEAR_SKY_METERS = 9144;
+
         if (cbaseData && Array.isArray(cbaseData) && cbaseData.length > 0) {
-            const cbaseLower = cbaseData[lowerIndex];
-            const cbaseUpper = cbaseData[upperIndex];
+            // Use meteogram timestamps for interpolation if cbase comes from meteogram
+            let cbaseLowerIdx = lowerIndex;
+            let cbaseUpperIdx = upperIndex;
+            let cbaseFraction = fraction;
+            let cbaseNeedsInterp = needsInterpolation;
+
+            if (cbaseSource === 'meteogram' && cbaseTimestamps && cbaseTimestamps.length > 0) {
+                // Recalculate interpolation indices for meteogram timestamps
+                const meteogramInterp = getInterpolationIndices(cbaseTimestamps, effectiveTimestamp);
+                cbaseLowerIdx = meteogramInterp.lowerIndex;
+                cbaseUpperIdx = meteogramInterp.upperIndex;
+                cbaseFraction = meteogramInterp.fraction;
+                cbaseNeedsInterp = meteogramInterp.needsInterpolation;
+
+                if (enableLogging) {
+                    console.log(`[VFR Debug] Meteogram cbase interpolation for ${waypointName}:`, {
+                        lowerIdx: cbaseLowerIdx,
+                        upperIdx: cbaseUpperIdx,
+                        fraction: cbaseFraction.toFixed(2),
+                        needsInterp: cbaseNeedsInterp
+                    });
+                }
+            }
+
+            const cbaseLower = cbaseData[cbaseLowerIdx];
+            const cbaseUpper = cbaseData[cbaseUpperIdx];
             const isLowerValid = cbaseLower !== null && cbaseLower !== undefined && !isNaN(cbaseLower) && cbaseLower > 0;
             const isUpperValid = cbaseUpper !== null && cbaseUpper !== undefined && !isNaN(cbaseUpper) && cbaseUpper > 0;
 
             let cbaseValue: number | null = null;
-            if (needsInterpolation) {
-                if (isLowerValid && isUpperValid) {
-                    cbaseValue = interpolateValue(cbaseLower, cbaseUpper, fraction);
-                }
+
+            // Always interpolate between lower and upper values
+            if (cbaseNeedsInterp && isLowerValid && isUpperValid) {
+                cbaseValue = interpolateValue(cbaseLower, cbaseUpper, cbaseFraction);
+            } else if (isLowerValid) {
+                cbaseValue = cbaseLower;
+            } else if (isUpperValid) {
+                cbaseValue = cbaseUpper;
             } else {
-                cbaseValue = isLowerValid ? cbaseLower : (isUpperValid ? cbaseUpper : null);
+                cbaseValue = CLEAR_SKY_METERS; // Clear sky
             }
 
             if (enableLogging) {
-                console.log(`[VFR Cbase Debug] ${waypointName || 'unknown'}: timestamp=${new Date(effectiveTimestamp).toISOString()}, lowerIndex=${lowerIndex}, upperIndex=${upperIndex}, fraction=${fraction.toFixed(2)}, cbaseLower=${cbaseLower}m (${cbaseLower ? Math.round(metersToFeet(cbaseLower)) : 'N/A'}ft), cbaseUpper=${cbaseUpper}m (${cbaseUpper ? Math.round(metersToFeet(cbaseUpper)) : 'N/A'}ft), final=${cbaseValue}m (${cbaseValue ? Math.round(metersToFeet(cbaseValue)) : 'N/A'}ft)`);
+                console.log(`[VFR Cbase Debug] ${waypointName || 'unknown'}: source=${cbaseSource}, timestamp=${new Date(effectiveTimestamp).toISOString()}, lowerIndex=${cbaseLowerIdx}, upperIndex=${cbaseUpperIdx}, fraction=${cbaseFraction.toFixed(2)}, cbaseLower=${cbaseLower}m (${cbaseLower ? Math.round(metersToFeet(cbaseLower)) : 'CLR'}ft), cbaseUpper=${cbaseUpper}m (${cbaseUpper ? Math.round(metersToFeet(cbaseUpper)) : 'CLR'}ft), final=${cbaseValue}m (${cbaseValue ? Math.round(metersToFeet(cbaseValue)) : 'CLR'}ft)`);
             }
 
             if (cbaseValue !== null && cbaseValue !== undefined && !isNaN(cbaseValue) && cbaseValue > 0) {
                 cloudBase = cbaseValue;
                 const cloudBaseFeet = metersToFeet(cloudBase);
-                cloudBaseDisplay = `${Math.round(cloudBaseFeet)} ft`;
+                // Show CLR for clear sky (29999 ft)
+                if (cloudBaseFeet >= 29000) {
+                    cloudBaseDisplay = 'CLR';
+                } else {
+                    cloudBaseDisplay = `${Math.round(cloudBaseFeet)} ft`;
+                }
             }
+        } else {
+            // No cbase data at all - treat as clear sky
+            cloudBase = CLEAR_SKY_METERS;
+            cloudBaseDisplay = 'CLR';
         }
 
         // Extract gust data
