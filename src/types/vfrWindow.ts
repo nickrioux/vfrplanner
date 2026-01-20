@@ -76,6 +76,10 @@ export interface VFRWindowSearchOptions {
     startFrom?: number;
     /** Collect detailed data for CSV export */
     collectDetailedData?: boolean;
+    /** Include night hours in search (default: false - daylight only) */
+    includeNightFlights?: boolean;
+    /** Route coordinates for sun position calculation (first waypoint lat/lon) */
+    routeCoordinates?: { lat: number; lon: number };
 }
 
 /**
