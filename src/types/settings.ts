@@ -9,7 +9,9 @@ export interface PluginSettings {
 
     // Display options
     showLabels: boolean;
-    allowDrag: boolean;
+
+    // VFR Window options
+    includeNightFlights: boolean; // Include night hours when searching for VFR windows
 
     // Import options
     autoTerrainElevation: boolean; // Auto-set terrain elevation for departure/arrival on import
@@ -33,7 +35,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAirspeed: 100,
     defaultAltitude: 3000,
     showLabels: false,
-    allowDrag: true,
+    includeNightFlights: false, // By default, only show VFR windows during daylight hours
     autoTerrainElevation: true, // Auto-set terrain elevation for departure/arrival
     airportdbApiKey: '', // User must provide their own API key
     enableLogging: false,

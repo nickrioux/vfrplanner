@@ -17,6 +17,7 @@ import type {
     VFRWindowCSVData,
 } from '../types/vfrWindow';
 import { metersToFeet } from '../utils/units';
+import { filterToDaylightHours } from '../utils/sunCalc';
 
 /**
  * Weather cache to avoid redundant API calls during search
@@ -774,7 +775,15 @@ export async function findVFRWindows(
     onProgress?: (progress: number) => void,
     enableLogging: boolean = false
 ): Promise<VFRWindowSearchResult> {
-    const { minimumCondition, maxConcurrent = 8, maxWindows = 5, startFrom, collectDetailedData = false } = options;
+    const {
+        minimumCondition,
+        maxConcurrent = 8,
+        maxWindows = 5,
+        startFrom,
+        collectDetailedData = false,
+        includeNightFlights = false,
+        routeCoordinates,
+    } = options;
 
     // Get forecast time range from first waypoint
     if (waypoints.length === 0) {
@@ -932,11 +941,61 @@ export async function findVFRWindows(
     cache.clear();
     forecastCache.clear();
 
+    // Filter to daylight hours if night flights are not included
+    let filteredWindows = windows;
+    if (!includeNightFlights && windows.length > 0) {
+        // Use route coordinates or first waypoint for daylight calculation
+        const lat = routeCoordinates?.lat ?? waypoints[0].lat;
+        const lon = routeCoordinates?.lon ?? waypoints[0].lon;
+
+        if (enableLogging) {
+            console.log(`[VFR Window] Filtering to daylight hours at ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+        }
+
+        filteredWindows = [];
+        for (const window of windows) {
+            // Get daylight ranges within this window
+            const daylightRanges = filterToDaylightHours(window.startTime, window.endTime, lat, lon);
+
+            for (const range of daylightRanges) {
+                const durationMinutes = (range.end - range.start) / (60 * 1000);
+
+                // Only include if the daylight portion is long enough for the flight
+                if (durationMinutes >= flightDuration) {
+                    filteredWindows.push({
+                        startTime: range.start,
+                        endTime: range.end,
+                        duration: durationMinutes,
+                        worstCondition: window.worstCondition,
+                        confidence: calculateConfidence(range.start),
+                    });
+
+                    if (enableLogging) {
+                        console.log(`[VFR Window] Daylight window: ${new Date(range.start).toISOString()} to ${new Date(range.end).toISOString()} (${Math.round(durationMinutes)} min)`);
+                    }
+                } else if (enableLogging) {
+                    console.log(`[VFR Window] Skipping daylight window (too short): ${Math.round(durationMinutes)} min < ${flightDuration} min required`);
+                }
+            }
+        }
+
+        // Limit to maxWindows after filtering
+        filteredWindows = filteredWindows.slice(0, maxWindows);
+
+        if (enableLogging) {
+            console.log(`[VFR Window] After daylight filter: ${filteredWindows.length} windows (was ${windows.length})`);
+        }
+    }
+
     // Determine if search was limited
     let limitedBy: string | undefined;
-    if (windows.length === 0 && candidateRanges.length > 0) {
-        limitedBy = `All candidate windows shorter than ${flightDuration} min flight duration`;
-    } else if (windows.length >= maxWindows) {
+    if (filteredWindows.length === 0 && candidateRanges.length > 0) {
+        if (!includeNightFlights && windows.length > 0) {
+            limitedBy = 'All VFR windows are outside daylight hours';
+        } else {
+            limitedBy = `All candidate windows shorter than ${flightDuration} min flight duration`;
+        }
+    } else if (filteredWindows.length >= maxWindows) {
         limitedBy = `Limited to first ${maxWindows} windows`;
     }
 
@@ -955,7 +1014,7 @@ export async function findVFRWindows(
     }
 
     return {
-        windows,
+        windows: filteredWindows,
         searchRange: { start: actualSearchStart, end: forecastRange.end },
         minimumCondition,
         flightDuration,

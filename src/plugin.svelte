@@ -133,11 +133,11 @@
                 </button>
                 <button
                     class="btn-action"
-                    class:active={isAddingWaypoint}
-                    on:click={toggleAddWaypoint}
-                    title="Click on map to add waypoint"
+                    class:btn-edit-active={isEditMode}
+                    on:click={toggleEditMode}
+                    title={isEditMode ? 'Exit edit mode (Esc)' : 'Edit: add/move waypoints'}
                 >
-                    {isAddingWaypoint ? '✓ Click map' : '➕ Add Point'}
+                    {isEditMode ? '✏️ Done' : '✏️ Edit'}
                 </button>
             </div>
         {/if}
@@ -543,17 +543,6 @@
                 <label class="setting-checkbox">
                     <input
                         type="checkbox"
-                        bind:checked={settings.allowDrag}
-                        on:change={handleSettingsChange}
-                    />
-                    Allow waypoint dragging
-                </label>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-checkbox">
-                    <input
-                        type="checkbox"
                         bind:checked={settings.autoTerrainElevation}
                         on:change={handleSettingsChange}
                     />
@@ -573,6 +562,20 @@
                     />
                     Show waypoint labels on map
                 </label>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        bind:checked={settings.includeNightFlights}
+                        on:change={handleSettingsChange}
+                    />
+                    Include night hours in VFR window search
+                </label>
+                <div class="setting-description">
+                    When disabled, VFR windows are limited to daylight hours (sunrise to sunset) based on route location.
+                </div>
             </div>
 
             <div class="setting-group">
@@ -638,7 +641,7 @@
             </div>
 
             <div class="setting-info">
-                <p>Tip: {settings.allowDrag ? 'Drag markers on map to reposition waypoints' : 'Enable dragging to reposition waypoints'}</p>
+                <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
             </div>
         </div>
     {/if}
@@ -711,7 +714,10 @@
     let isSearching = false;
     let searchError: string | null = null;
     let showSearchPanel = false;
-    let isAddingWaypoint = false;
+
+    // Edit mode state (transient, not persisted)
+    // When true: markers are draggable, map clicks add waypoints, segment clicks insert waypoints
+    let isEditMode = false;
 
     // Weather state
     let weatherData: Map<string, WaypointWeather> = new Map();
@@ -1039,7 +1045,7 @@
         flightPlan = null;
         selectedWaypointId = null;
         error = null;
-        isAddingWaypoint = false;
+        isEditMode = false;
         activeTab = 'route';
         resetRoutePanel();
         clearMapLayers();
@@ -1072,8 +1078,8 @@
         error = null;
         resetRoutePanel();
 
-        // Enable waypoint adding mode immediately
-        isAddingWaypoint = true;
+        // Enable edit mode immediately for new plans
+        isEditMode = true;
 
         // Update map
         updateMapLayers();
@@ -1366,7 +1372,7 @@
     }
 
     function handleWaypointDrag(waypointId: string, newLat: number, newLon: number) {
-        if (!flightPlan || !settings.allowDrag) return;
+        if (!flightPlan || !isEditMode) return;
 
         const newWaypoints = flightPlan.waypoints.map(wp => {
             if (wp.id === waypointId) {
@@ -1388,8 +1394,15 @@
         saveSession();
     }
 
-    function toggleAddWaypoint() {
-        isAddingWaypoint = !isAddingWaypoint;
+    function toggleEditMode() {
+        isEditMode = !isEditMode;
+
+        // Reset cursor when exiting edit mode
+        if (!isEditMode) {
+            map.getContainer().style.cursor = '';
+        }
+
+        updateMapLayers();
     }
 
     // AirportDB Search Functions
@@ -1581,7 +1594,7 @@
     }
 
     async function handleMapClick(latLon: LatLon) {
-        if (!isAddingWaypoint || !flightPlan) return;
+        if (!isEditMode || !flightPlan) return;
 
         const { lat, lon } = latLon;
         const isFirstWaypoint = flightPlan.waypoints.length === 0;
@@ -1638,7 +1651,7 @@
             totals: navResult.totals,
         };
 
-        isAddingWaypoint = false;
+        // Stay in edit mode after adding waypoint
         updateMapLayers();
         saveSession();
     }
@@ -1646,12 +1659,30 @@
     function handleSettingsChange() {
         if (!flightPlan) return;
 
+        // Track old default altitude to update enroute waypoints
+        const oldDefaultAltitude = flightPlan.aircraft.defaultAltitude;
+        const newDefaultAltitude = settings.defaultAltitude;
+
         // Update aircraft settings
         flightPlan.aircraft.airspeed = settings.defaultAirspeed;
-        flightPlan.aircraft.defaultAltitude = settings.defaultAltitude;
+        flightPlan.aircraft.defaultAltitude = newDefaultAltitude;
+
+        // Update enroute waypoints that were using the old default altitude
+        // Enroute = not first (departure) or last (arrival) waypoint
+        let updatedWaypoints = flightPlan.waypoints;
+        if (oldDefaultAltitude !== newDefaultAltitude && flightPlan.waypoints.length > 2) {
+            updatedWaypoints = flightPlan.waypoints.map((wp, index) => {
+                const isEnroute = index > 0 && index < flightPlan.waypoints.length - 1;
+                // Update enroute waypoints that have the old default altitude
+                if (isEnroute && wp.altitude === oldDefaultAltitude) {
+                    return { ...wp, altitude: newDefaultAltitude };
+                }
+                return wp;
+            });
+        }
 
         // Recalculate navigation with new airspeed
-        const navResult = calculateFlightPlanNavigation(flightPlan.waypoints, settings.defaultAirspeed);
+        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
 
         flightPlan = {
             ...flightPlan,
@@ -2226,8 +2257,10 @@
                     minimumCondition: windowSearchMinCondition,
                     maxConcurrent: 4,
                     maxWindows: 5,
-                    startFrom: departureTime, // Start search from current departure time
+                    startFrom: Date.now(), // Always start search from now
                     collectDetailedData: settings.enableLogging, // Collect for CSV export only when debug logging enabled
+                    includeNightFlights: settings.includeNightFlights,
+                    routeCoordinates: { lat: flightPlan.waypoints[0].lat, lon: flightPlan.waypoints[0].lon },
                 },
                 (progress) => {
                     windowSearchProgress = progress;
@@ -2332,15 +2365,15 @@
 
             // Add click handler to insert waypoint on this segment
             segment.on('click', (e: L.LeafletMouseEvent) => {
-                if (settings.allowDrag) {
+                if (isEditMode) {
                     L.DomEvent.stopPropagation(e);
                     insertWaypointOnSegment(i, e.latlng.lat, e.latlng.lng);
                 }
             });
 
-            // Change cursor when hovering if dragging is enabled
+            // Change cursor when hovering if edit mode is enabled
             segment.on('mouseover', () => {
-                if (settings.allowDrag) {
+                if (isEditMode) {
                     map.getContainer().style.cursor = 'crosshair';
                 }
             });
@@ -2365,8 +2398,8 @@
         flightPlan.waypoints.forEach((wp, index) => {
             let marker: L.Marker | L.CircleMarker;
 
-            if (settings.allowDrag) {
-                // Use regular marker for dragging
+            if (isEditMode) {
+                // Use regular marker for dragging in edit mode
                 marker = new L.Marker([wp.lat, wp.lon], {
                     draggable: true,
                     icon: L.divIcon({
@@ -2662,10 +2695,18 @@
         }
     };
 
+    function handleKeyDown(e: KeyboardEvent) {
+        if (e.key === 'Escape' && isEditMode) {
+            toggleEditMode();
+        }
+    }
+
     onMount(() => {
         singleclick.on(name, handleMapClick);
         // Listen to Windy's timeline changes
         store.on('timestamp', handleWindyTimestampChange);
+        // Listen for keyboard shortcuts
+        window.addEventListener('keydown', handleKeyDown);
     });
 
     onDestroy(() => {
@@ -2673,6 +2714,8 @@
         singleclick.off(name, handleMapClick);
         // Clean up Windy timestamp listener
         store.off('timestamp', handleWindyTimestampChange);
+        // Clean up keyboard listener
+        window.removeEventListener('keydown', handleKeyDown);
     });
 </script>
 
@@ -3152,6 +3195,12 @@
         &.btn-weather.has-alerts {
             background: rgba(243, 156, 18, 0.3);
             border: 1px solid #f39c12;
+        }
+
+        &.btn-edit-active {
+            background: #27ae60;
+            color: white;
+            box-shadow: 0 0 8px rgba(39, 174, 96, 0.5);
         }
     }
 

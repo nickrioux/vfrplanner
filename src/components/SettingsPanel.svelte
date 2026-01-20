@@ -57,17 +57,6 @@
         <label class="setting-checkbox">
             <input
                 type="checkbox"
-                bind:checked={settings.allowDrag}
-                on:change={handleChange}
-            />
-            Allow waypoint dragging
-        </label>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-checkbox">
-            <input
-                type="checkbox"
                 bind:checked={settings.autoTerrainElevation}
                 on:change={handleChange}
             />
@@ -87,6 +76,20 @@
             />
             Show waypoint labels on map
         </label>
+    </div>
+
+    <div class="setting-group">
+        <label class="setting-checkbox">
+            <input
+                type="checkbox"
+                bind:checked={settings.includeNightFlights}
+                on:change={handleChange}
+            />
+            Include night hours in VFR window search
+        </label>
+        <div class="setting-description">
+            When disabled, VFR windows are limited to daylight hours (sunrise to sunset) based on route location.
+        </div>
     </div>
 
     <div class="setting-group">
@@ -153,7 +156,7 @@
     </div>
 
     <div class="setting-info">
-        <p>Tip: {settings.allowDrag ? 'Drag markers on map to reposition waypoints' : 'Enable dragging to reposition waypoints'}</p>
+        <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
     </div>
 </div>
 
