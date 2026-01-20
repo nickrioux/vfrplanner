@@ -88,7 +88,7 @@
             Include night hours in VFR window search
         </label>
         <div class="setting-description">
-            When disabled, VFR windows are limited to daylight hours (sunrise to sunset) based on route location.
+            When disabled, VFR windows are limited to 30 min before sunrise to 30 min after sunset.
         </div>
     </div>
 
