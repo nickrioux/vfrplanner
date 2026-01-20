@@ -4,8 +4,8 @@
  */
 
 import type { Waypoint } from '../types/flightPlan';
-import type { WaypointWeather, ForecastTimeRange } from './weatherService';
-import { fetchWaypointWeather, getForecastTimeRange } from './weatherService';
+import type { WaypointWeather, ForecastTimeRange, FullForecastData } from './weatherService';
+import { fetchWaypointWeather, getForecastTimeRange, fetchFullForecast, extractWeatherAtTimestamp } from './weatherService';
 import { evaluateSegmentCondition, type SegmentCondition, type ProfileDataPoint } from './profileService';
 import type {
     MinimumConditionLevel,
@@ -45,6 +45,132 @@ class WeatherCache {
 
     clear(): void {
         this.cache.clear();
+    }
+
+    get size(): number {
+        return this.cache.size;
+    }
+}
+
+/**
+ * Forecast cache to store full forecast data per unique location
+ * Key format: `${lat.toFixed(4)}_${lon.toFixed(4)}`
+ * This dramatically reduces API calls by fetching each location only once
+ */
+class ForecastCache {
+    private cache: Map<string, FullForecastData | null> = new Map();
+    private pendingFetches: Map<string, Promise<FullForecastData | null>> = new Map();
+
+    private makeKey(lat: number, lon: number): string {
+        return `${lat.toFixed(4)}_${lon.toFixed(4)}`;
+    }
+
+    /**
+     * Get or fetch full forecast for a location
+     * Uses deduplication to avoid fetching the same location multiple times
+     */
+    async getOrFetch(
+        lat: number,
+        lon: number,
+        altitude: number,
+        enableLogging: boolean = false
+    ): Promise<FullForecastData | null> {
+        const key = this.makeKey(lat, lon);
+
+        // Return cached result if available
+        if (this.cache.has(key)) {
+            return this.cache.get(key) ?? null;
+        }
+
+        // If a fetch is already in progress for this location, wait for it
+        if (this.pendingFetches.has(key)) {
+            return this.pendingFetches.get(key)!;
+        }
+
+        // Start a new fetch
+        const fetchPromise = fetchFullForecast(lat, lon, altitude, enableLogging)
+            .then((forecast) => {
+                this.cache.set(key, forecast);
+                this.pendingFetches.delete(key);
+                return forecast;
+            })
+            .catch((error) => {
+                if (enableLogging) {
+                    console.error(`[VFR Window] Error fetching forecast for ${lat},${lon}:`, error);
+                }
+                this.cache.set(key, null);
+                this.pendingFetches.delete(key);
+                return null;
+            });
+
+        this.pendingFetches.set(key, fetchPromise);
+        return fetchPromise;
+    }
+
+    /**
+     * Prefetch forecasts for all unique locations in parallel
+     * This is the key optimization - fetch once per location, not per timestamp
+     */
+    async prefetchLocations(
+        waypoints: Waypoint[],
+        altitude: number,
+        enableLogging: boolean = false
+    ): Promise<void> {
+        // Get unique locations (deduplicate by key)
+        const uniqueLocations = new Map<string, Waypoint>();
+        for (const wp of waypoints) {
+            const key = this.makeKey(wp.lat, wp.lon);
+            if (!uniqueLocations.has(key)) {
+                uniqueLocations.set(key, wp);
+            }
+        }
+
+        if (enableLogging) {
+            console.log(`[VFR Window] Prefetching forecasts for ${uniqueLocations.size} unique locations (${waypoints.length} waypoints)`);
+        }
+
+        // Fetch all unique locations in parallel
+        const fetchPromises = Array.from(uniqueLocations.values()).map((wp) =>
+            this.getOrFetch(wp.lat, wp.lon, altitude, enableLogging)
+        );
+
+        await Promise.all(fetchPromises);
+
+        if (enableLogging) {
+            console.log(`[VFR Window] Prefetch complete: ${this.cache.size} forecasts cached`);
+        }
+    }
+
+    /**
+     * Extract weather at a specific timestamp from cached forecast
+     */
+    extractWeather(
+        lat: number,
+        lon: number,
+        timestamp: number,
+        altitude: number,
+        waypointName?: string,
+        enableLogging: boolean = false
+    ): WaypointWeather | null {
+        const key = this.makeKey(lat, lon);
+        const forecast = this.cache.get(key);
+
+        if (!forecast) {
+            return null;
+        }
+
+        return extractWeatherAtTimestamp(forecast, timestamp, altitude, waypointName, enableLogging);
+    }
+
+    has(lat: number, lon: number): boolean {
+        const key = this.makeKey(lat, lon);
+        // Only return true if we have a valid (non-null) forecast
+        return this.cache.has(key) && this.cache.get(key) !== null;
+    }
+
+    clear(): void {
+        this.cache.clear();
+        this.pendingFetches.clear();
     }
 
     get size(): number {
@@ -126,12 +252,16 @@ function calculateWaypointTimings(
 /**
  * Fetch weather for multiple waypoints in parallel
  * Returns array of weather data in same order as input
+ *
+ * When forecastCache is provided, extracts weather from prefetched full forecasts
+ * (O(1) per waypoint/timestamp), otherwise falls back to fetching each separately.
  */
 async function fetchWeatherParallel(
     waypointInfos: WaypointFetchInfo[],
     cache: WeatherCache,
     pluginName: string,
-    enableLogging: boolean
+    enableLogging: boolean,
+    forecastCache?: ForecastCache
 ): Promise<(WaypointWeather | null)[]> {
     const results: (WaypointWeather | null)[] = new Array(waypointInfos.length);
     const fetchPromises: Promise<void>[] = [];
@@ -139,14 +269,33 @@ async function fetchWeatherParallel(
     for (const info of waypointInfos) {
         const { index, waypoint: wp, altitude, arrivalTime } = info;
 
-        // Check cache first
+        // Check result cache first (avoids re-processing same location/time)
         const cached = cache.get(wp.lat, wp.lon, arrivalTime);
         if (cached !== undefined) {
             results[index] = cached;
             continue;
         }
 
-        // Need to fetch - create promise
+        // If we have a forecast cache, try to extract from it (fast path - no API call)
+        if (forecastCache && forecastCache.has(wp.lat, wp.lon)) {
+            const weather = forecastCache.extractWeather(
+                wp.lat,
+                wp.lon,
+                arrivalTime,
+                altitude,
+                wp.name,
+                enableLogging
+            );
+            // Only use cached result if extraction succeeded
+            if (weather !== null) {
+                cache.set(wp.lat, wp.lon, arrivalTime, weather);
+                results[index] = weather;
+                continue;
+            }
+            // If extraction failed, fall through to individual fetch
+        }
+
+        // Fallback: fetch individually (slow path - makes API call)
         const fetchPromise = fetchWaypointWeather(
             wp.lat,
             wp.lon,
@@ -171,8 +320,10 @@ async function fetchWeatherParallel(
         fetchPromises.push(fetchPromise);
     }
 
-    // Wait for all fetches to complete
-    await Promise.all(fetchPromises);
+    // Wait for any fallback fetches to complete
+    if (fetchPromises.length > 0) {
+        await Promise.all(fetchPromises);
+    }
 
     return results;
 }
@@ -189,13 +340,14 @@ export async function evaluateDepartureTime(
     minimumCondition: MinimumConditionLevel,
     cache: WeatherCache,
     pluginName: string = 'VFR Planner',
-    enableLogging: boolean = false
+    enableLogging: boolean = false,
+    forecastCache?: ForecastCache
 ): Promise<DepartureTimeEvaluation> {
     // Pre-calculate all waypoint timings
     const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
 
-    // Fetch all weather data in parallel
-    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging);
+    // Fetch all weather data in parallel (uses forecastCache for fast extraction if available)
+    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging, forecastCache);
 
     // Now evaluate conditions sequentially (for early exit and worst condition tracking)
     let worstCondition: SegmentCondition = 'good';
@@ -280,13 +432,14 @@ export async function evaluateDepartureTimeDetailed(
     minimumCondition: MinimumConditionLevel,
     cache: WeatherCache,
     pluginName: string = 'VFR Planner',
-    enableLogging: boolean = false
+    enableLogging: boolean = false,
+    forecastCache?: ForecastCache
 ): Promise<{ evaluation: DepartureTimeEvaluation; details: WaypointEvaluationDetail[] }> {
     // Pre-calculate all waypoint timings
     const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
 
-    // Fetch all weather data in parallel
-    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging);
+    // Fetch all weather data in parallel (uses forecastCache for fast extraction if available)
+    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging, forecastCache);
 
     // Now evaluate and collect details
     let worstCondition: SegmentCondition = 'good';
@@ -443,7 +596,8 @@ async function coarseScanForWindows(
     onProgress?: (progress: number) => void,
     enableLogging: boolean = false,
     startFrom?: number,
-    collectDetailedData: boolean = false
+    collectDetailedData: boolean = false,
+    forecastCache?: ForecastCache
 ): Promise<{ candidateRanges: { start: number; end: number }[]; detailedData: WaypointEvaluationDetail[] }> {
     const interval = 1 * 60 * 60 * 1000; // 1 hour in ms
     const timestamps: number[] = [];
@@ -477,7 +631,7 @@ async function coarseScanForWindows(
             // Use detailed evaluation for CSV export
             const batchResults = await Promise.all(
                 batch.map((t) =>
-                    evaluateDepartureTimeDetailed(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging)
+                    evaluateDepartureTimeDetailed(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache)
                 )
             );
             for (const result of batchResults) {
@@ -488,7 +642,7 @@ async function coarseScanForWindows(
             // Use simple evaluation
             const batchResults = await Promise.all(
                 batch.map((t) =>
-                    evaluateDepartureTime(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging)
+                    evaluateDepartureTime(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache)
                 )
             );
             evaluations.push(...batchResults);
@@ -568,6 +722,7 @@ async function coarseScanForWindows(
  * @param cache - Weather cache
  * @param precision - Target precision in minutes (default: 30)
  * @param enableLogging - Enable debug logging
+ * @param forecastCache - Optional forecast cache for fast weather extraction
  * @returns Refined boundary timestamp
  */
 async function refineWindowBoundary(
@@ -578,7 +733,8 @@ async function refineWindowBoundary(
     minimumCondition: MinimumConditionLevel,
     cache: WeatherCache,
     precision: number = 30,
-    enableLogging: boolean = false
+    enableLogging: boolean = false,
+    forecastCache?: ForecastCache
 ): Promise<number> {
     const precisionMs = precision * 60 * 1000;
     let good = knownGood;
@@ -593,7 +749,8 @@ async function refineWindowBoundary(
             minimumCondition,
             cache,
             'VFR Planner',
-            enableLogging
+            enableLogging,
+            forecastCache
         );
 
         if (midEval.isAcceptable) {
@@ -641,8 +798,9 @@ export async function findVFRWindows(
         };
     }
 
-    // Initialize cache
+    // Initialize caches
     const cache = new WeatherCache();
+    const forecastCache = new ForecastCache();
 
     // Determine actual search start (use startFrom if within forecast range, aligned to 1h intervals)
     const interval = 1 * 60 * 60 * 1000; // 1 hour in ms
@@ -661,8 +819,17 @@ export async function findVFRWindows(
         }
     }
 
-    // Scan at 1-hour intervals
+    // OPTIMIZATION: Prefetch full forecasts for all waypoint locations
+    // This fetches each location only ONCE, then extracts data for all timestamps
+    // Reduces API calls from (waypoints × timestamps) to just (unique locations)
+    onProgress?.(0.02);
+    if (enableLogging) {
+        console.log(`[VFR Window] Prefetching forecasts for all waypoints...`);
+    }
+    await forecastCache.prefetchLocations(waypoints, defaultAltitude, enableLogging);
     onProgress?.(0.05);
+
+    // Scan at 1-hour intervals
     const { candidateRanges, detailedData } = await coarseScanForWindows(
         forecastRange,
         waypoints,
@@ -674,7 +841,8 @@ export async function findVFRWindows(
         onProgress,
         enableLogging,
         startFrom,
-        collectDetailedData
+        collectDetailedData,
+        forecastCache
     );
 
     // Phase 2: Refine boundaries for each candidate range
@@ -699,7 +867,8 @@ export async function findVFRWindows(
                 minimumCondition,
                 cache,
                 30,
-                enableLogging
+                enableLogging,
+                forecastCache
             );
         }
         refinementDone++;
@@ -718,7 +887,8 @@ export async function findVFRWindows(
                 minimumCondition,
                 cache,
                 30,
-                enableLogging
+                enableLogging,
+                forecastCache
             );
         }
         refinementDone++;
@@ -755,11 +925,12 @@ export async function findVFRWindows(
 
     onProgress?.(1.0);
 
-    // Clean up cache
+    // Clean up caches
     if (enableLogging) {
-        console.log(`[VFR Window] Search complete. Cache entries: ${cache.size}, Windows found: ${windows.length}`);
+        console.log(`[VFR Window] Search complete. Weather cache: ${cache.size} entries, Forecast cache: ${forecastCache.size} locations, Windows found: ${windows.length}`);
     }
     cache.clear();
+    forecastCache.clear();
 
     // Determine if search was limited
     let limitedBy: string | undefined;
