@@ -87,8 +87,100 @@ function calculateConfidence(timestamp: number): 'high' | 'medium' | 'low' {
 }
 
 /**
+ * Waypoint info with pre-calculated timing for parallel fetch
+ */
+interface WaypointFetchInfo {
+    index: number;
+    waypoint: Waypoint;
+    altitude: number;
+    arrivalTime: number;
+    isTerminal: boolean;
+}
+
+/**
+ * Pre-calculate waypoint timing information
+ */
+function calculateWaypointTimings(
+    departureTime: number,
+    waypoints: Waypoint[],
+    defaultAltitude: number
+): WaypointFetchInfo[] {
+    const infos: WaypointFetchInfo[] = [];
+    let cumulativeEteMinutes = 0;
+
+    for (let i = 0; i < waypoints.length; i++) {
+        const wp = waypoints[i];
+        infos.push({
+            index: i,
+            waypoint: wp,
+            altitude: wp.altitude ?? defaultAltitude,
+            arrivalTime: departureTime + (cumulativeEteMinutes * 60 * 1000),
+            isTerminal: i === 0 || i === waypoints.length - 1,
+        });
+        cumulativeEteMinutes += wp.ete || 0;
+    }
+
+    return infos;
+}
+
+/**
+ * Fetch weather for multiple waypoints in parallel
+ * Returns array of weather data in same order as input
+ */
+async function fetchWeatherParallel(
+    waypointInfos: WaypointFetchInfo[],
+    cache: WeatherCache,
+    pluginName: string,
+    enableLogging: boolean
+): Promise<(WaypointWeather | null)[]> {
+    const results: (WaypointWeather | null)[] = new Array(waypointInfos.length);
+    const fetchPromises: Promise<void>[] = [];
+
+    for (const info of waypointInfos) {
+        const { index, waypoint: wp, altitude, arrivalTime } = info;
+
+        // Check cache first
+        const cached = cache.get(wp.lat, wp.lon, arrivalTime);
+        if (cached !== undefined) {
+            results[index] = cached;
+            continue;
+        }
+
+        // Need to fetch - create promise
+        const fetchPromise = fetchWaypointWeather(
+            wp.lat,
+            wp.lon,
+            pluginName,
+            arrivalTime,
+            wp.name,
+            altitude,
+            enableLogging
+        )
+            .then((weather) => {
+                cache.set(wp.lat, wp.lon, arrivalTime, weather);
+                results[index] = weather;
+            })
+            .catch((error) => {
+                if (enableLogging) {
+                    console.error(`[VFR Window] Error fetching weather for ${wp.name}:`, error);
+                }
+                cache.set(wp.lat, wp.lon, arrivalTime, null);
+                results[index] = null;
+            });
+
+        fetchPromises.push(fetchPromise);
+    }
+
+    // Wait for all fetches to complete
+    await Promise.all(fetchPromises);
+
+    return results;
+}
+
+/**
  * Evaluate conditions at a specific departure time
  * Checks weather at each waypoint accounting for flight time to reach it
+ * Uses parallel weather fetching for improved performance
  */
 export async function evaluateDepartureTime(
     departureTime: number,
@@ -99,45 +191,20 @@ export async function evaluateDepartureTime(
     pluginName: string = 'VFR Planner',
     enableLogging: boolean = false
 ): Promise<DepartureTimeEvaluation> {
+    // Pre-calculate all waypoint timings
+    const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
+
+    // Fetch all weather data in parallel
+    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging);
+
+    // Now evaluate conditions sequentially (for early exit and worst condition tracking)
     let worstCondition: SegmentCondition = 'good';
     let limitingWaypoint: string | undefined;
     let limitingReasons: string[] | undefined;
 
-    // Calculate cumulative ETE to track arrival time at each waypoint
-    let cumulativeEteMinutes = 0;
-
-    for (let i = 0; i < waypoints.length; i++) {
-        const wp = waypoints[i];
-        const altitude = wp.altitude ?? defaultAltitude;
-        const isTerminal = i === 0 || i === waypoints.length - 1;
-
-        // Calculate arrival time at this waypoint
-        const arrivalTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
-
-        // Try to get weather from cache first
-        let weather: WaypointWeather | null | undefined = cache.get(wp.lat, wp.lon, arrivalTime);
-
-        if (weather === undefined) {
-            // Not in cache, fetch it
-            try {
-                weather = await fetchWaypointWeather(
-                    wp.lat,
-                    wp.lon,
-                    pluginName,
-                    arrivalTime,
-                    wp.name,
-                    altitude,
-                    enableLogging
-                );
-                cache.set(wp.lat, wp.lon, arrivalTime, weather);
-            } catch (error) {
-                if (enableLogging) {
-                    console.error(`[VFR Window] Error fetching weather for ${wp.name}:`, error);
-                }
-                cache.set(wp.lat, wp.lon, arrivalTime, null);
-                weather = null;
-            }
-        }
+    for (const info of waypointInfos) {
+        const { index, waypoint: wp, altitude, isTerminal } = info;
+        const weather = weatherResults[index];
 
         // If we couldn't get weather, treat as unknown
         if (!weather) {
@@ -191,9 +258,6 @@ export async function evaluateDepartureTime(
                 limitingReasons: evaluation.reasons,
             };
         }
-
-        // Add this waypoint's ETE to cumulative for next waypoint
-        cumulativeEteMinutes += wp.ete || 0;
     }
 
     return {
@@ -207,6 +271,7 @@ export async function evaluateDepartureTime(
 
 /**
  * Evaluate conditions at a specific departure time and collect detailed data for CSV export
+ * Uses parallel weather fetching for improved performance
  */
 export async function evaluateDepartureTimeDetailed(
     departureTime: number,
@@ -217,51 +282,29 @@ export async function evaluateDepartureTimeDetailed(
     pluginName: string = 'VFR Planner',
     enableLogging: boolean = false
 ): Promise<{ evaluation: DepartureTimeEvaluation; details: WaypointEvaluationDetail[] }> {
+    // Pre-calculate all waypoint timings
+    const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
+
+    // Fetch all weather data in parallel
+    const weatherResults = await fetchWeatherParallel(waypointInfos, cache, pluginName, enableLogging);
+
+    // Now evaluate and collect details
     let worstCondition: SegmentCondition = 'good';
     let limitingWaypoint: string | undefined;
     let limitingReasons: string[] | undefined;
     const details: WaypointEvaluationDetail[] = [];
 
-    // Calculate cumulative ETE to track arrival time at each waypoint
-    let cumulativeEteMinutes = 0;
-
-    for (let i = 0; i < waypoints.length; i++) {
-        const wp = waypoints[i];
-        const altitude = wp.altitude ?? defaultAltitude;
-        const isTerminal = i === 0 || i === waypoints.length - 1;
-
-        // Calculate arrival time at this waypoint
-        const arrivalTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
-
-        // Try to get weather from cache first
-        let weather: WaypointWeather | null | undefined = cache.get(wp.lat, wp.lon, arrivalTime);
-
-        if (weather === undefined) {
-            // Not in cache, fetch it
-            try {
-                weather = await fetchWaypointWeather(
-                    wp.lat,
-                    wp.lon,
-                    pluginName,
-                    arrivalTime,
-                    wp.name,
-                    altitude,
-                    enableLogging
-                );
-                cache.set(wp.lat, wp.lon, arrivalTime, weather);
-            } catch (error) {
-                cache.set(wp.lat, wp.lon, arrivalTime, null);
-                weather = null;
-            }
-        }
+    for (const info of waypointInfos) {
+        const { index, waypoint: wp, altitude, arrivalTime, isTerminal } = info;
+        const weather = weatherResults[index];
 
         // If we couldn't get weather, record as unknown
         if (!weather) {
             details.push({
                 departureTime,
                 departureTimeISO: new Date(departureTime).toISOString(),
-                waypointName: wp.name || `WP${i}`,
-                waypointIndex: i,
+                waypointName: wp.name || `WP${index}`,
+                waypointIndex: index,
                 arrivalTime,
                 arrivalTimeISO: new Date(arrivalTime).toISOString(),
                 altitude,
@@ -273,8 +316,6 @@ export async function evaluateDepartureTimeDetailed(
                 conditionReasons: 'Unable to fetch weather data',
                 isTerminal,
             });
-
-            cumulativeEteMinutes += wp.ete || 0;
             continue;
         }
 
@@ -315,8 +356,8 @@ export async function evaluateDepartureTimeDetailed(
         details.push({
             departureTime,
             departureTimeISO: new Date(departureTime).toISOString(),
-            waypointName: wp.name || `WP${i}`,
-            waypointIndex: i,
+            waypointName: wp.name || `WP${index}`,
+            waypointIndex: index,
             arrivalTime,
             arrivalTimeISO: new Date(arrivalTime).toISOString(),
             altitude,
@@ -333,9 +374,6 @@ export async function evaluateDepartureTimeDetailed(
             conditionReasons: evaluation.reasons?.join('; ') || '',
             isTerminal,
         });
-
-        // Add this waypoint's ETE to cumulative for next waypoint
-        cumulativeEteMinutes += wp.ete || 0;
     }
 
     const isAcceptable = meetsMinimumCondition(worstCondition, minimumCondition);
@@ -579,7 +617,7 @@ export async function findVFRWindows(
     onProgress?: (progress: number) => void,
     enableLogging: boolean = false
 ): Promise<VFRWindowSearchResult> {
-    const { minimumCondition, maxConcurrent = 4, maxWindows = 5, startFrom, collectDetailedData = false } = options;
+    const { minimumCondition, maxConcurrent = 8, maxWindows = 5, startFrom, collectDetailedData = false } = options;
 
     // Get forecast time range from first waypoint
     if (waypoints.length === 0) {
