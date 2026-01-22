@@ -93,6 +93,22 @@
     </div>
 
     <div class="setting-group">
+        <label class="setting-label">Max VFR Windows to Find</label>
+        <div class="setting-input">
+            <input
+                type="number"
+                bind:value={settings.maxVFRWindows}
+                on:change={handleChange}
+                min="1"
+                max="50"
+            />
+        </div>
+        <div class="setting-description">
+            Maximum number of VFR windows to find across the forecast period (up to 10 days).
+        </div>
+    </div>
+
+    <div class="setting-group">
         <label class="setting-label">Terrain Sample Interval</label>
         <div class="setting-input">
             <input

@@ -2256,7 +2256,7 @@
                 {
                     minimumCondition: windowSearchMinCondition,
                     maxConcurrent: 4,
-                    maxWindows: 5,
+                    maxWindows: settings.maxVFRWindows,
                     startFrom: Date.now(), // Always start search from now
                     collectDetailedData: settings.enableLogging, // Collect for CSV export only when debug logging enabled
                     includeNightFlights: settings.includeNightFlights,
