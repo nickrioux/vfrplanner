@@ -12,6 +12,7 @@ export interface PluginSettings {
 
     // VFR Window options
     includeNightFlights: boolean; // Include night hours when searching for VFR windows
+    maxVFRWindows: number; // Maximum number of VFR windows to find
 
     // Import options
     autoTerrainElevation: boolean; // Auto-set terrain elevation for departure/arrival on import
@@ -36,6 +37,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAltitude: 3000,
     showLabels: false,
     includeNightFlights: false, // By default, only show VFR windows during daylight hours
+    maxVFRWindows: 10, // Find up to 10 VFR windows by default
     autoTerrainElevation: true, // Auto-set terrain elevation for departure/arrival
     airportdbApiKey: '', // User must provide their own API key
     enableLogging: false,
