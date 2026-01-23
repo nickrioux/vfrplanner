@@ -1,7 +1,6 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
     import type { PluginSettings, FlightPlan } from '../types';
-    import pluginConfig from '../pluginConfig';
 
     export let settings: PluginSettings;
     export let maxProfileAltitude: number;
@@ -171,14 +170,6 @@
             Enable debug logging
         </label>
     </div>
-
-    <div class="setting-info">
-        <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
-    </div>
-
-    <div class="version-info">
-        v{pluginConfig.version}
-    </div>
 </div>
 
 <style lang="less">
@@ -283,12 +274,5 @@
             font-size: 12px;
             color: #888;
         }
-    }
-
-    .version-info {
-        margin-top: 15px;
-        text-align: right;
-        font-size: 11px;
-        color: #666;
     }
 </style>

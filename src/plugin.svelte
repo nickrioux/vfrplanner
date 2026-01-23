@@ -28,6 +28,11 @@
                 class:active={activeTab === 'settings'}
                 on:click={() => activeTab = 'settings'}
             >Settings</button>
+            <button
+                class="tab"
+                class:active={activeTab === 'about'}
+                on:click={() => activeTab = 'about'}
+            >About</button>
         </div>
     {/if}
 
@@ -485,6 +490,10 @@
                     {/each}
                 </div>
             </div>
+
+            <div class="setting-info">
+                <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
+            </div>
         {/if}
     {/if}
 
@@ -579,6 +588,22 @@
             </div>
 
             <div class="setting-group">
+                <label class="setting-label">Max VFR Windows</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        bind:value={settings.maxVFRWindows}
+                        on:change={handleSettingsChange}
+                        min="1"
+                        max="50"
+                    />
+                </div>
+                <div class="setting-description">
+                    Maximum number of VFR windows to find when searching (up to 10 days forecast).
+                </div>
+            </div>
+
+            <div class="setting-group">
                 <label class="setting-label">Terrain Sample Interval</label>
                 <div class="setting-input">
                     <input
@@ -639,9 +664,46 @@
                     Enable debug logging
                 </label>
             </div>
+        </div>
+    {/if}
 
-            <div class="setting-info">
-                <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
+    <!-- About Tab -->
+    {#if activeTab === 'about' && flightPlan}
+        <div class="about-section">
+            <div class="about-header">
+                <span class="about-icon">✈️</span>
+                <h3>VFR Flight Planner</h3>
+                <span class="about-version">v{config.version}</span>
+            </div>
+
+            <div class="about-description">
+                <p>A Windy.com plugin for VFR flight planning with weather overlay, altitude profiles, and navigation calculations.</p>
+            </div>
+
+            <div class="about-disclaimer">
+                <h4>⚠️ Important Disclaimer</h4>
+                <p>
+                    <strong>This tool is for flight planning purposes only and should NOT be used as a source of official weather information.</strong>
+                </p>
+                <p>
+                    Weather data displayed in this plugin is derived from meteorological models and may not reflect actual conditions. For official aviation weather information, always consult:
+                </p>
+                <ul>
+                    <li><strong>United States:</strong> FAA-approved sources such as <a href="https://aviationweather.gov" target="_blank" rel="noopener">aviationweather.gov</a> (Aviation Weather Center)</li>
+                    <li><strong>Canada:</strong> NAV CANADA official sources at <a href="https://flightplanning.navcanada.ca" target="_blank" rel="noopener">flightplanning.navcanada.ca</a></li>
+                </ul>
+                <p>
+                    Pilots are responsible for obtaining proper weather briefings from official sources before any flight. This plugin does not provide METARs, TAFs, NOTAMs, PIREPs, AIRMETs, SIGMETs, or other official aviation weather products.
+                </p>
+            </div>
+
+            <div class="about-credits">
+                <h4>Data Sources</h4>
+                <ul>
+                    <li>Weather data: <a href="https://windy.com" target="_blank" rel="noopener">Windy.com</a></li>
+                    <li>Airport data: <a href="https://airportdb.io" target="_blank" rel="noopener">AirportDB.io</a></li>
+                    <li>Elevation data: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a></li>
+                </ul>
             </div>
         </div>
     {/if}
@@ -3797,6 +3859,131 @@
 
         p {
             margin: 0;
+        }
+    }
+
+    .about-section {
+        padding: 15px;
+        overflow-y: auto;
+    }
+
+    .about-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 15px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+
+        .about-icon {
+            font-size: 24px;
+        }
+
+        h3 {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            flex: 1;
+        }
+
+        .about-version {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.5);
+            background: rgba(255, 255, 255, 0.1);
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+    }
+
+    .about-description {
+        margin-bottom: 15px;
+
+        p {
+            margin: 0;
+            font-size: 13px;
+            color: rgba(255, 255, 255, 0.7);
+            line-height: 1.5;
+        }
+    }
+
+    .about-disclaimer {
+        background: rgba(231, 76, 60, 0.15);
+        border: 1px solid rgba(231, 76, 60, 0.3);
+        border-radius: 6px;
+        padding: 12px;
+        margin-bottom: 15px;
+
+        h4 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: #e74c3c;
+        }
+
+        p {
+            margin: 0 0 10px 0;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.8);
+            line-height: 1.5;
+
+            &:last-child {
+                margin-bottom: 0;
+            }
+        }
+
+        ul {
+            margin: 10px 0;
+            padding-left: 20px;
+
+            li {
+                font-size: 12px;
+                color: rgba(255, 255, 255, 0.8);
+                line-height: 1.6;
+                margin-bottom: 5px;
+            }
+        }
+
+        a {
+            color: #3498db;
+            text-decoration: none;
+
+            &:hover {
+                text-decoration: underline;
+            }
+        }
+    }
+
+    .about-credits {
+        background: rgba(255, 255, 255, 0.05);
+        border-radius: 6px;
+        padding: 12px;
+
+        h4 {
+            margin: 0 0 8px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        ul {
+            margin: 0;
+            padding-left: 20px;
+
+            li {
+                font-size: 12px;
+                color: rgba(255, 255, 255, 0.6);
+                line-height: 1.6;
+            }
+        }
+
+        a {
+            color: #3498db;
+            text-decoration: none;
+
+            &:hover {
+                text-decoration: underline;
+            }
         }
     }
 </style>
