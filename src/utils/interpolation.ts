@@ -5,6 +5,7 @@
 
 import type { Waypoint } from '../types/flightPlan';
 import type { WaypointWeather } from '../services/weatherService';
+import { calculateWindComponents as calcWindComponents } from '../services/navigationCalc';
 
 /**
  * Linear interpolation between two values
@@ -178,17 +179,14 @@ export function interpolateWindBetweenWaypoints(
         windGust = nextWx!.windGust;
     }
 
-    // Calculate wind components
+    // Calculate wind components using centralized function
     let headwindComponent = 0;
     let crosswindComponent = 0;
 
     if (bearing !== undefined) {
-        const trackRad = (bearing * Math.PI) / 180;
-        const windRad = (windDir * Math.PI) / 180;
-        const angleDiff = trackRad - windRad;
-
-        headwindComponent = windSpeed * Math.cos(angleDiff);
-        crosswindComponent = windSpeed * Math.sin(angleDiff);
+        const windComp = calcWindComponents(bearing, windDir, windSpeed);
+        headwindComponent = windComp.headwind;
+        crosswindComponent = windComp.crosswind;
     }
 
     return {
@@ -202,18 +200,16 @@ export function interpolateWindBetweenWaypoints(
 
 /**
  * Calculate wind components from weather data
+ * Uses centralized wind calculation from navigationCalc
  */
 function calculateWindComponents(wx: WaypointWeather, bearing?: number): InterpolatedWind {
     let headwindComponent = 0;
     let crosswindComponent = 0;
 
     if (bearing !== undefined) {
-        const trackRad = (bearing * Math.PI) / 180;
-        const windRad = (wx.windDir * Math.PI) / 180;
-        const angleDiff = trackRad - windRad;
-
-        headwindComponent = wx.windSpeed * Math.cos(angleDiff);
-        crosswindComponent = wx.windSpeed * Math.sin(angleDiff);
+        const windComp = calcWindComponents(bearing, wx.windDir, wx.windSpeed);
+        headwindComponent = windComp.headwind;
+        crosswindComponent = windComp.crosswind;
     }
 
     return {

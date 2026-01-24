@@ -802,6 +802,7 @@
         type ForecastTimeRange,
     } from './services/weatherService';
     import { calculateProfileData, findBestRunway, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { logger } from './services/logger';
     import { findVFRWindows, formatVFRWindow, type VFRWindow, type VFRWindowSearchResult } from './services/vfrWindowService';
     import type { MinimumConditionLevel, VFRWindowCSVData } from './types/vfrWindow';
     import { fetchRouteElevationProfile, fetchPointElevation, type ElevationPoint } from './services/elevationService';
@@ -892,13 +893,14 @@
         // Reset departure time to now
         departureTime = Date.now();
 
-        if (settings.enableLogging) {
-            console.log('[VFR Planner] Route panel state reset');
-        }
+        logger.debug('Route panel state reset');
     }
 
     // Settings
     let settings: PluginSettings = { ...DEFAULT_SETTINGS };
+
+    // Sync logger state with settings
+    $: logger.setEnabled(settings.enableLogging);
 
     // Floating window state
     let floatingWindow: FloatingWindowState = { ...DEFAULT_FLOATING_WINDOW };
@@ -2903,8 +2905,8 @@
                 version: '1.0', // For future migration
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionData));
-        } catch (error) {
-            console.warn('[VFR Planner] Failed to save session:', error);
+        } catch (err) {
+            logger.warn('Failed to save session:', err);
         }
     }
 
@@ -2953,8 +2955,8 @@
                 updateMapLayers();
                 fitMapToRoute();
             }
-        } catch (error) {
-            console.warn('[VFR Planner] Failed to load session:', error);
+        } catch (err) {
+            logger.warn('Failed to load session:', err);
             // Clear corrupted session data
             localStorage.removeItem(STORAGE_KEY);
         }
@@ -3009,18 +3011,15 @@
         padding: 0 !important;
     }
 
-    /* Scrollable content wrapper for floating mode */
+    /* Scrollable content wrapper - works for both panel and floating mode */
     .main-content-scroll {
-        display: contents; /* Default: no effect on layout */
-    }
-
-    .main-content-scroll.floating-scroll {
         display: flex;
         flex-direction: column;
         flex: 1;
         overflow-y: auto;
         overflow-x: hidden;
         min-height: 0; /* Important for flex scroll */
+        padding: 0 12px 12px 12px;
     }
 
     :global(.plugin__content.floating-mode.minimized) {
