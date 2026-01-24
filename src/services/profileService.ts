@@ -5,7 +5,8 @@
 
 import type { Waypoint, RunwayInfo } from '../types/flightPlan';
 import type { WaypointWeather, LevelWind } from './weatherService';
-import { calculateHeadwindComponent } from './navigationCalc';
+import { calculateHeadwindComponent, calculateWindComponents, type WindComponents } from './navigationCalc';
+import { logger } from './logger';
 import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
 import { interpolateWindBetweenWaypoints, interpolateBearing } from '../utils/interpolation';
 import { metersToFeet } from '../utils/units';
@@ -32,26 +33,15 @@ function estimateCloudTop(cloudBase: number): number {
  * @param windDir - Wind direction in degrees (where wind comes FROM)
  * @param windSpeed - Wind speed in knots
  * @returns Object with headwind (positive = headwind, negative = tailwind) and crosswind components
+ * @deprecated Use calculateWindComponents from navigationCalc for new code
  */
 export function calculateWindComponent(
     trackBearing: number,
     windDir: number,
     windSpeed: number
-): { headwind: number; crosswind: number } {
-    // Convert to radians
-    const trackRad = (trackBearing * Math.PI) / 180;
-    const windRad = (windDir * Math.PI) / 180;
-
-    // Calculate angle difference
-    const angleDiff = trackRad - windRad;
-
-    // Headwind component: positive = headwind (slows aircraft), negative = tailwind (speeds up)
-    const headwind = windSpeed * Math.cos(angleDiff);
-
-    // Crosswind component: positive = right crosswind, negative = left crosswind
-    const crosswind = windSpeed * Math.sin(angleDiff);
-
-    return { headwind, crosswind };
+): WindComponents {
+    // Delegate to centralized implementation
+    return calculateWindComponents(trackBearing, windDir, windSpeed);
 }
 
 /**
@@ -246,16 +236,16 @@ export function evaluateSegmentCondition(
         const terminalWindSpeed = wx.surfaceWindSpeed ?? criteria.windSpeed;
         const terminalWindDir = wx.surfaceWindDir ?? point.windDir;
 
-        console.log(`[VFR Runway] Terminal waypoint: ${waypoint?.name}, hasRunways: ${!!waypoint?.runways}, count: ${waypoint?.runways?.length ?? 0}`);
-        console.log(`[VFR Runway] Surface wind: ${Math.round(terminalWindDir)}° @ ${Math.round(terminalWindSpeed)}kt`);
+        logger.debug(`[VFR Runway] Terminal waypoint: ${waypoint?.name}, hasRunways: ${!!waypoint?.runways}, count: ${waypoint?.runways?.length ?? 0}`);
+        logger.debug(`[VFR Runway] Surface wind: ${Math.round(terminalWindDir)}° @ ${Math.round(terminalWindSpeed)}kt`);
 
         // Calculate crosswind if runway data is available
         if (waypoint?.runways && waypoint.runways.length > 0) {
-            console.log(`[VFR Runway] Runways available:`, waypoint.runways.map(r => `${r.lowEnd.ident}/${r.highEnd.ident} (${r.lowEnd.headingTrue}°/${r.highEnd.headingTrue}°)`));
+            logger.debug(`[VFR Runway] Runways available:`, waypoint.runways.map(r => `${r.lowEnd.ident}/${r.highEnd.ident} (${r.lowEnd.headingTrue}°/${r.highEnd.headingTrue}°)`));
             bestRunway = findBestRunway(waypoint.runways, terminalWindDir, terminalWindSpeed) ?? undefined;
 
             if (bestRunway) {
-                console.log(`[VFR Runway] Best runway: ${bestRunway.runwayIdent}, crosswind: ${Math.round(bestRunway.crosswindKt)}kt, headwind: ${Math.round(bestRunway.headwindKt)}kt`);
+                logger.debug(`[VFR Runway] Best runway: ${bestRunway.runwayIdent}, crosswind: ${Math.round(bestRunway.crosswindKt)}kt, headwind: ${Math.round(bestRunway.headwindKt)}kt`);
                 // Crosswind limits (typical light aircraft limits)
                 // > 15kt crosswind is challenging, > 20kt is dangerous for most pilots
                 if (bestRunway.crosswindKt > 20) {
@@ -486,9 +476,9 @@ export function calculateProfileData(
 
             // Debug: log waypoint weather lookup
             if (isWaypoint && wp) {
-                console.log(`[Profile Debug] Waypoint ${wp.name} (${wp.id}): wx=${wx ? 'found' : 'NOT FOUND'}, weatherData size=${weatherData.size}`);
+                logger.debug(`[Profile Debug] Waypoint ${wp.name} (${wp.id}): wx=${wx ? 'found' : 'NOT FOUND'}, weatherData size=${weatherData.size}`);
                 if (!wx && weatherData.size > 0) {
-                    console.log(`[Profile Debug] Available keys:`, Array.from(weatherData.keys()));
+                    logger.debug(`[Profile Debug] Available keys:`, Array.from(weatherData.keys()));
                 }
             }
 

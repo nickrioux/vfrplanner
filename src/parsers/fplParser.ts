@@ -30,6 +30,9 @@ const xmlParser = new XMLParser({
     attributeNamePrefix: '@_',
     parseAttributeValue: true,
     trimValues: true,
+    // Security: Disable external entity processing to prevent XXE attacks
+    processEntities: false,
+    htmlEntities: false,
 });
 
 /**
