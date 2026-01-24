@@ -547,12 +547,12 @@ export async function evaluateDepartureTimeDetailed(
 /**
  * Run evaluations with concurrency control
  */
-async function runWithConcurrency<T>(
+async function runWithConcurrency<T, R>(
     items: T[],
-    fn: (item: T) => Promise<any>,
+    fn: (item: T) => Promise<R>,
     maxConcurrent: number
-): Promise<any[]> {
-    const results: any[] = [];
+): Promise<R[]> {
+    const results: R[] = [];
     const executing: Promise<void>[] = [];
 
     for (const item of items) {

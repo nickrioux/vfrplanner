@@ -40,20 +40,53 @@ export function calculateDistance(
 }
 
 /**
+ * Wind component result with headwind and crosswind
+ */
+export interface WindComponents {
+    /** Headwind component: positive = headwind (slows aircraft), negative = tailwind (speeds up) */
+    headwind: number;
+    /** Crosswind component: positive = right crosswind, negative = left crosswind */
+    crosswind: number;
+}
+
+/**
+ * Calculate both headwind and crosswind components
+ * @param trackTrue - Aircraft track direction in degrees true
+ * @param windDir - Wind direction in degrees (where wind comes FROM)
+ * @param windSpeed - Wind speed in knots
+ * @returns Object with headwind and crosswind components
+ */
+export function calculateWindComponents(
+    trackTrue: number,
+    windDir: number,
+    windSpeed: number
+): WindComponents {
+    // Convert to radians
+    const trackRad = (trackTrue * Math.PI) / 180;
+    const windRad = (windDir * Math.PI) / 180;
+
+    // Calculate angle difference
+    const angleDiff = trackRad - windRad;
+
+    // Headwind component: positive = headwind (slows aircraft), negative = tailwind (speeds up)
+    const headwind = windSpeed * Math.cos(angleDiff);
+
+    // Crosswind component: positive = right crosswind, negative = left crosswind
+    const crosswind = windSpeed * Math.sin(angleDiff);
+
+    return { headwind, crosswind };
+}
+
+/**
  * Calculate headwind component (positive = headwind, negative = tailwind)
+ * @deprecated Use calculateWindComponents() for both headwind and crosswind
  */
 export function calculateHeadwindComponent(
     trackTrue: number,
     windDir: number,
     windSpeed: number
 ): number {
-    // Wind direction is where wind comes FROM
-    // Convert to radians
-    const trackRad = (trackTrue * Math.PI) / 180;
-    const windRad = (windDir * Math.PI) / 180;
-
-    // Headwind component: positive = headwind (slowing down), negative = tailwind (speeding up)
-    return windSpeed * Math.cos(windRad - trackRad);
+    return calculateWindComponents(trackTrue, windDir, windSpeed).headwind;
 }
 
 /**
