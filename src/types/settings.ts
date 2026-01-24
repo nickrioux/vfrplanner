@@ -2,6 +2,16 @@
  * Plugin settings types
  */
 
+export type WindowMode = 'panel' | 'floating';
+
+export interface FloatingWindowState {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    minimized: boolean;
+}
+
 export interface PluginSettings {
     // Aircraft defaults
     defaultAirspeed: number; // TAS in knots
@@ -9,6 +19,10 @@ export interface PluginSettings {
 
     // Display options
     showLabels: boolean;
+
+    // Window mode
+    windowMode: WindowMode; // 'panel' = rhpane, 'floating' = overlay window
+    floatingWindow: FloatingWindowState; // Position and size for floating mode
 
     // VFR Window options
     includeNightFlights: boolean; // Include night hours when searching for VFR windows
@@ -32,10 +46,20 @@ export interface PluginSettings {
     speedUnit: 'kt' | 'kmh' | 'mph';
 }
 
+export const DEFAULT_FLOATING_WINDOW: FloatingWindowState = {
+    x: 100,
+    y: 100,
+    width: 420,
+    height: 600,
+    minimized: false,
+};
+
 export const DEFAULT_SETTINGS: PluginSettings = {
     defaultAirspeed: 100,
     defaultAltitude: 3000,
     showLabels: false,
+    windowMode: 'panel', // Default to standard rhpane mode
+    floatingWindow: { ...DEFAULT_FLOATING_WINDOW },
     includeNightFlights: false, // By default, only show VFR windows during daylight hours
     maxVFRWindows: 10, // Find up to 10 VFR windows by default
     autoTerrainElevation: true, // Auto-set terrain elevation for departure/arrival

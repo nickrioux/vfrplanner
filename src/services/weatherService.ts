@@ -10,6 +10,7 @@ import type { DataHash, WeatherDataPayload } from '@windy/interfaces';
 import type { Products } from '@windy/rootScope';
 import type { HttpPayload } from '@windy/http';
 import type { Waypoint } from '../types/flightPlan';
+import type { WindyPointForecastData, WindyMeteogramData } from '../types/weather';
 import { metersToFeet, msToKnots, kelvinToCelsius } from '../utils/units';
 import {
     getInterpolationIndices,
@@ -61,9 +62,9 @@ export interface FullForecastData {
     /** Meteogram timestamps (may differ from point forecast) */
     meteogramTimestamps?: number[];
     /** Raw point forecast data arrays */
-    pointForecastData: any;
+    pointForecastData: WindyPointForecastData;
     /** Raw meteogram data for vertical winds and cbase */
-    meteogramData: any | null;
+    meteogramData: WindyMeteogramData;
     /** Vertical wind profile at all levels (first time index) */
     verticalWinds: LevelWind[];
     /** When this forecast was fetched */
@@ -299,7 +300,7 @@ const METEOGRAM_PRESSURE_LEVELS = [
  * @returns Wind speed (knots) and direction (degrees), or null if not available
  */
 export function getWindAtAltitudeFromMeteogram(
-    meteogramData: any,
+    meteogramData: WindyMeteogramData,
     altitudeFt: number,
     timeIndex: number = 0,
     enableLogging: boolean = false
@@ -394,7 +395,7 @@ export function getWindAtAltitudeFromMeteogram(
  * Find wind U/V key pairs dynamically from meteogram data
  * Searches for patterns like windU-850h, wind_u-850h, gh-850h, etc.
  */
-function findWindKeyPairs(meteogramData: any, enableLogging: boolean = false): Map<string, { uKey: string; vKey: string }> {
+function findWindKeyPairs(meteogramData: WindyMeteogramData, enableLogging: boolean = false): Map<string, { uKey: string; vKey: string }> {
     const allKeys = Object.keys(meteogramData);
     const levelKeyPairs = new Map<string, { uKey: string; vKey: string }>();
 
@@ -448,7 +449,7 @@ function findWindKeyPairs(meteogramData: any, enableLogging: boolean = false): M
  * @returns Array of wind data at each available level
  */
 export function getAllWindLevelsFromMeteogram(
-    meteogramData: any,
+    meteogramData: WindyMeteogramData,
     timeIndex: number = 0,
     enableLogging: boolean = false
 ): LevelWind[] {
@@ -771,12 +772,12 @@ export async function fetchWaypointWeather(
         // Try to use getPointForecastData with levels option first
         // If that doesn't work, we'll try the direct API call
         let response;
-        let responseData: any;
+        let responseData: WindyPointForecastData | undefined;
         
         try {
             // First, try passing levels in options to getPointForecastData
             // This might work if Windy's plugin API supports it
-            const options: Record<string, any> = {};
+            const options: Record<string, string[]> = {};
             if (levels.length > 0 && levels[0] !== 'surface') {
                 options.levels = levels;
             }
@@ -828,7 +829,7 @@ export async function fetchWaypointWeather(
                 
                 // Read response body once
                 let responseBodyText = '';
-                let apiResult: any = null;
+                let apiResult: { data?: WindyPointForecastData } | WindyPointForecastData | null = null;
                 try {
                     responseBodyText = await apiResponse.text();
                     if (responseBodyText) {
@@ -1350,16 +1351,19 @@ export async function fetchFlightPlanWeather(
  * @param weather - Weather data for the waypoint
  * @param thresholds - Alert thresholds
  * @param plannedAltitude - Planned flight altitude in feet (optional, for altitude conflict check)
+ * @param isTerminal - True if this is a departure or arrival waypoint (wind/gust alerts only apply to terminals)
  */
 export function checkWeatherAlerts(
     weather: WaypointWeather,
     thresholds: WeatherAlertThresholds = DEFAULT_ALERT_THRESHOLDS,
-    plannedAltitude?: number
+    plannedAltitude?: number,
+    isTerminal: boolean = false
 ): WeatherAlert[] {
     const alerts: WeatherAlert[] = [];
 
-    // Wind speed alert
-    if (weather.windSpeed >= thresholds.windSpeed) {
+    // Wind speed alert - only for terminal waypoints (departure/arrival)
+    // Enroute wind at altitude affects ground speed, not safety
+    if (isTerminal && weather.windSpeed >= thresholds.windSpeed) {
         alerts.push({
             type: 'wind',
             severity: weather.windSpeed >= thresholds.windSpeed * 1.5 ? 'warning' : 'caution',
@@ -1369,8 +1373,8 @@ export function checkWeatherAlerts(
         });
     }
 
-    // Gust alert
-    if (weather.windGust && weather.windGust >= thresholds.gustSpeed) {
+    // Gust alert - only for terminal waypoints (departure/arrival)
+    if (isTerminal && weather.windGust && weather.windGust >= thresholds.gustSpeed) {
         alerts.push({
             type: 'gust',
             severity: weather.windGust >= thresholds.gustSpeed * 1.3 ? 'warning' : 'caution',
@@ -1509,7 +1513,7 @@ export async function fetchFullForecast(
         }
 
         // Fetch meteogram data for vertical winds and cbase
-        let meteogramData: any = null;
+        let meteogramData: WindyMeteogramData = null;
         let meteogramTimestamps: number[] | undefined;
         let verticalWinds: LevelWind[] = [];
 

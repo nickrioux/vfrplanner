@@ -1,13 +1,47 @@
+<!-- Panel mode mobile header (hidden in floating mode) -->
+{#if settings.windowMode === 'panel'}
 <div class="plugin__mobile-header">
     {title}
 </div>
-<section class="plugin__content">
-    <div
-        class="plugin__title plugin__title--chevron-back"
-        on:click={() => bcast.emit('rqstOpen', 'menu')}
-    >
-        {title}
-    </div>
+{/if}
+
+<section
+    class="plugin__content"
+    class:floating-mode={settings.windowMode === 'floating'}
+    class:minimized={settings.windowMode === 'floating' && floatingWindow.minimized}
+    class:dragging={isDragging}
+    class:resizing={isResizing}
+    style={settings.windowMode === 'floating' ? `left: ${floatingWindow.x}px; top: ${floatingWindow.y}px; width: ${floatingWindow.width}px; height: ${floatingWindow.minimized ? 'auto' : floatingWindow.height + 'px'};` : ''}
+    bind:this={floatingWindowEl}
+>
+    <!-- Floating mode header -->
+    {#if settings.windowMode === 'floating'}
+        <div class="floating-header" on:mousedown={startDrag}>
+            <span class="floating-title">✈️ {title}</span>
+            <div class="floating-controls">
+                <button class="floating-btn" on:click|stopPropagation={toggleMinimize} title={floatingWindow.minimized ? 'Expand' : 'Minimize'}>
+                    {floatingWindow.minimized ? '▢' : '−'}
+                </button>
+                <button class="floating-btn" on:click|stopPropagation={toggleWindowMode} title="Switch to panel mode">
+                    ⊟
+                </button>
+            </div>
+        </div>
+    {/if}
+
+    <!-- Panel mode title (hidden in floating mode) -->
+    {#if settings.windowMode === 'panel'}
+        <div
+            class="plugin__title plugin__title--chevron-back"
+            on:click={() => bcast.emit('rqstOpen', 'menu')}
+        >
+            {title}
+        </div>
+    {/if}
+
+    <!-- Main content (hidden when minimized in floating mode) -->
+    {#if !(settings.windowMode === 'floating' && floatingWindow.minimized)}
+    <div class="main-content-scroll" class:floating-scroll={settings.windowMode === 'floating'}>
 
     <!-- Tabs -->
     {#if flightPlan}
@@ -520,6 +554,25 @@
     {#if activeTab === 'settings' && flightPlan}
         <div class="settings-section">
             <div class="setting-group">
+                <label class="setting-label">Window Mode</label>
+                <div class="setting-toggle">
+                    <button
+                        class="toggle-btn"
+                        class:active={settings.windowMode === 'panel'}
+                        on:click={() => { settings.windowMode = 'panel'; saveSession(); }}
+                    >Panel</button>
+                    <button
+                        class="toggle-btn"
+                        class:active={settings.windowMode === 'floating'}
+                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); }}
+                    >Floating</button>
+                </div>
+                <div class="setting-description">
+                    Panel mode uses Windy's right-hand pane. Floating mode creates a draggable, resizable window.
+                </div>
+            </div>
+
+            <div class="setting-group">
                 <label class="setting-label">Default Airspeed (TAS)</label>
                 <div class="setting-input">
                     <input
@@ -707,6 +760,21 @@
             </div>
         </div>
     {/if}
+
+    </div><!-- /main-content-scroll -->
+    {/if}<!-- /minimized content check -->
+
+    <!-- Resize handles for floating mode -->
+    {#if settings.windowMode === 'floating' && !floatingWindow.minimized}
+        <div class="resize-handle resize-n" on:mousedown={(e) => startResize(e, 'n')}></div>
+        <div class="resize-handle resize-s" on:mousedown={(e) => startResize(e, 's')}></div>
+        <div class="resize-handle resize-e" on:mousedown={(e) => startResize(e, 'e')}></div>
+        <div class="resize-handle resize-w" on:mousedown={(e) => startResize(e, 'w')}></div>
+        <div class="resize-handle resize-ne" on:mousedown={(e) => startResize(e, 'ne')}></div>
+        <div class="resize-handle resize-nw" on:mousedown={(e) => startResize(e, 'nw')}></div>
+        <div class="resize-handle resize-se" on:mousedown={(e) => startResize(e, 'se')}></div>
+        <div class="resize-handle resize-sw" on:mousedown={(e) => startResize(e, 'sw')}></div>
+    {/if}
 </section>
 
 <script lang="ts">
@@ -734,6 +802,7 @@
         type ForecastTimeRange,
     } from './services/weatherService';
     import { calculateProfileData, findBestRunway, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { logger } from './services/logger';
     import { findVFRWindows, formatVFRWindow, type VFRWindow, type VFRWindowSearchResult } from './services/vfrWindowService';
     import type { MinimumConditionLevel, VFRWindowCSVData } from './types/vfrWindow';
     import { fetchRouteElevationProfile, fetchPointElevation, type ElevationPoint } from './services/elevationService';
@@ -747,8 +816,8 @@
         type AirportDBResult,
         type AirportDBNavaid,
     } from './services/airportdbService';
-    import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
-    import { DEFAULT_SETTINGS } from './types';
+    import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo, FloatingWindowState } from './types';
+    import { DEFAULT_SETTINGS, DEFAULT_FLOATING_WINDOW } from './types';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
 
     import type { LatLon } from '@windy/interfaces';
@@ -824,13 +893,27 @@
         // Reset departure time to now
         departureTime = Date.now();
 
-        if (settings.enableLogging) {
-            console.log('[VFR Planner] Route panel state reset');
-        }
+        logger.debug('Route panel state reset');
     }
 
     // Settings
     let settings: PluginSettings = { ...DEFAULT_SETTINGS };
+
+    // Sync logger state with settings
+    $: logger.setEnabled(settings.enableLogging);
+
+    // Floating window state
+    let floatingWindow: FloatingWindowState = { ...DEFAULT_FLOATING_WINDOW };
+    let isDragging = false;
+    let isResizing = false;
+    let resizeDirection: string = '';
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let windowStartX = 0;
+    let windowStartY = 0;
+    let windowStartWidth = 0;
+    let windowStartHeight = 0;
+    let floatingWindowEl: HTMLElement | null = null;
 
     // Profile state
     let maxProfileAltitude: number = 15000;
@@ -1756,6 +1839,119 @@
         saveSession();
     }
 
+    // ===== Floating Window Functions =====
+
+    function startDrag(e: MouseEvent) {
+        if (settings.windowMode !== 'floating') return;
+        isDragging = true;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        windowStartX = floatingWindow.x;
+        windowStartY = floatingWindow.y;
+        document.addEventListener('mousemove', handleDrag);
+        document.addEventListener('mouseup', stopDrag);
+        e.preventDefault();
+    }
+
+    function handleDrag(e: MouseEvent) {
+        if (!isDragging) return;
+        const deltaX = e.clientX - dragStartX;
+        const deltaY = e.clientY - dragStartY;
+
+        // Calculate new position with bounds checking
+        const newX = Math.max(0, Math.min(window.innerWidth - floatingWindow.width, windowStartX + deltaX));
+        const newY = Math.max(0, Math.min(window.innerHeight - 50, windowStartY + deltaY));
+
+        floatingWindow.x = newX;
+        floatingWindow.y = newY;
+    }
+
+    function stopDrag() {
+        if (isDragging) {
+            isDragging = false;
+            document.removeEventListener('mousemove', handleDrag);
+            document.removeEventListener('mouseup', stopDrag);
+            settings.floatingWindow = { ...floatingWindow };
+            saveSession();
+        }
+    }
+
+    function startResize(e: MouseEvent, direction: string) {
+        if (settings.windowMode !== 'floating') return;
+        isResizing = true;
+        resizeDirection = direction;
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        windowStartX = floatingWindow.x;
+        windowStartY = floatingWindow.y;
+        windowStartWidth = floatingWindow.width;
+        windowStartHeight = floatingWindow.height;
+        document.addEventListener('mousemove', handleResize);
+        document.addEventListener('mouseup', stopResize);
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function handleResize(e: MouseEvent) {
+        if (!isResizing) return;
+        const deltaX = e.clientX - dragStartX;
+        const deltaY = e.clientY - dragStartY;
+
+        const minWidth = 320;
+        const minHeight = 400;
+        const maxWidth = window.innerWidth - floatingWindow.x;
+        const maxHeight = window.innerHeight - floatingWindow.y;
+
+        if (resizeDirection.includes('e')) {
+            floatingWindow.width = Math.max(minWidth, Math.min(maxWidth, windowStartWidth + deltaX));
+        }
+        if (resizeDirection.includes('w')) {
+            const newWidth = Math.max(minWidth, windowStartWidth - deltaX);
+            const newX = windowStartX + (windowStartWidth - newWidth);
+            if (newX >= 0) {
+                floatingWindow.width = newWidth;
+                floatingWindow.x = newX;
+            }
+        }
+        if (resizeDirection.includes('s')) {
+            floatingWindow.height = Math.max(minHeight, Math.min(maxHeight, windowStartHeight + deltaY));
+        }
+        if (resizeDirection.includes('n')) {
+            const newHeight = Math.max(minHeight, windowStartHeight - deltaY);
+            const newY = windowStartY + (windowStartHeight - newHeight);
+            if (newY >= 0) {
+                floatingWindow.height = newHeight;
+                floatingWindow.y = newY;
+            }
+        }
+    }
+
+    function stopResize() {
+        if (isResizing) {
+            isResizing = false;
+            resizeDirection = '';
+            document.removeEventListener('mousemove', handleResize);
+            document.removeEventListener('mouseup', stopResize);
+            settings.floatingWindow = { ...floatingWindow };
+            saveSession();
+        }
+    }
+
+    function toggleMinimize() {
+        floatingWindow.minimized = !floatingWindow.minimized;
+        settings.floatingWindow = { ...floatingWindow };
+        saveSession();
+    }
+
+    function toggleWindowMode() {
+        settings.windowMode = settings.windowMode === 'panel' ? 'floating' : 'panel';
+        if (settings.windowMode === 'floating') {
+            // Restore floating window position from settings
+            floatingWindow = { ...settings.floatingWindow };
+        }
+        saveSession();
+    }
+
     function handleExportGPX() {
         if (!flightPlan) return;
         downloadGPX(flightPlan);
@@ -1898,9 +2094,14 @@
             }
 
             // Check for alerts at each waypoint
+            // Wind/gust alerts only apply to terminal waypoints (departure/arrival)
             weatherAlerts = new Map();
+            const waypointCount = flightPlan.waypoints.length;
             weatherData.forEach((wx, waypointId) => {
-                const alerts = checkWeatherAlerts(wx, DEFAULT_ALERT_THRESHOLDS, plannedAltitude);
+                // Determine if this is a terminal waypoint (first or last)
+                const waypointIndex = flightPlan!.waypoints.findIndex(wp => wp.id === waypointId);
+                const isTerminal = waypointIndex === 0 || waypointIndex === waypointCount - 1;
+                const alerts = checkWeatherAlerts(wx, DEFAULT_ALERT_THRESHOLDS, plannedAltitude, isTerminal);
                 if (alerts.length > 0) {
                     weatherAlerts.set(waypointId, alerts);
                 }
@@ -2410,7 +2611,9 @@
         for (let i = 0; i < flightPlan.waypoints.length - 1; i++) {
             const wp1 = flightPlan.waypoints[i];
             const wp2 = flightPlan.waypoints[i + 1];
-            const condition = profileData[i]?.condition;
+            // Find the correct profile point by waypoint ID (profileData may contain terrain samples between waypoints)
+            const wp1ProfilePoint = profileData.find(p => p.waypointId === wp1.id);
+            const condition = wp1ProfilePoint?.condition;
 
             const segmentCoords: [number, number][] = [
                 [wp1.lat, wp1.lon],
@@ -2506,7 +2709,8 @@
             tooltipContent += `✈️ Altitude: ${Math.round(altitude)} ft MSL`;
 
             // Add terrain elevation if available
-            const pointData = profileData[index];
+            // Find the correct profile point by waypoint ID (profileData may contain terrain samples between waypoints)
+            const pointData = profileData.find(p => p.waypointId === wp.id);
             if (pointData?.terrainElevation !== undefined) {
                 const clearance = altitude - pointData.terrainElevation;
                 tooltipContent += ` | ⛰️ Terrain: ${Math.round(pointData.terrainElevation)} ft`;
@@ -2620,10 +2824,22 @@
                 }
             }
 
-            marker.bindTooltip(tooltipContent, {
-                permanent: false,
-                direction: 'top',
-            });
+            // When showLabels is enabled, show simple permanent labels
+            // Otherwise, show detailed tooltip on hover
+            if (settings.showLabels) {
+                const labelContent = `<b>${index + 1}. ${wp.name}</b>`;
+                marker.bindTooltip(labelContent, {
+                    permanent: true,
+                    direction: 'top',
+                    className: 'waypoint-label',
+                    offset: [0, -10],
+                });
+            } else {
+                marker.bindTooltip(tooltipContent, {
+                    permanent: false,
+                    direction: 'top',
+                });
+            }
 
             marker.on('click', () => {
                 selectedWaypointId = wp.id;
@@ -2689,8 +2905,8 @@
                 version: '1.0', // For future migration
             };
             localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionData));
-        } catch (error) {
-            console.warn('[VFR Planner] Failed to save session:', error);
+        } catch (err) {
+            logger.warn('Failed to save session:', err);
         }
     }
 
@@ -2739,8 +2955,8 @@
                 updateMapLayers();
                 fitMapToRoute();
             }
-        } catch (error) {
-            console.warn('[VFR Planner] Failed to load session:', error);
+        } catch (err) {
+            logger.warn('Failed to load session:', err);
             // Clear corrupted session data
             localStorage.removeItem(STORAGE_KEY);
         }
@@ -2782,6 +2998,170 @@
 </script>
 
 <style lang="less">
+    /* ===== Floating Window Mode Styles ===== */
+    :global(.plugin__content.floating-mode) {
+        position: fixed !important;
+        z-index: 10000 !important;
+        background: #1e1e2e !important;
+        border-radius: 8px !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
+        overflow: hidden !important;
+        display: flex !important;
+        flex-direction: column !important;
+        padding: 0 !important;
+    }
+
+    /* Scrollable content wrapper - works for both panel and floating mode */
+    .main-content-scroll {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        min-height: 0; /* Important for flex scroll */
+        padding: 0 12px 12px 12px;
+    }
+
+    :global(.plugin__content.floating-mode.minimized) {
+        height: auto !important;
+    }
+
+    :global(.plugin__content.floating-mode.dragging) {
+        opacity: 0.9;
+        cursor: grabbing !important;
+    }
+
+    :global(.plugin__content.floating-mode.resizing) {
+        user-select: none;
+    }
+
+    /* Waypoint permanent labels on map */
+    :global(.waypoint-label) {
+        background: rgba(30, 30, 46, 0.9) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 4px !important;
+        padding: 2px 6px !important;
+        font-size: 11px !important;
+        color: #fff !important;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+        white-space: nowrap !important;
+    }
+
+    :global(.waypoint-label::before) {
+        border-top-color: rgba(30, 30, 46, 0.9) !important;
+    }
+
+    .floating-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 10px 12px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        cursor: grab;
+        user-select: none;
+        flex-shrink: 0;
+
+        &:active {
+            cursor: grabbing;
+        }
+    }
+
+    .floating-title {
+        font-size: 14px;
+        font-weight: 600;
+        color: white;
+    }
+
+    .floating-controls {
+        display: flex;
+        gap: 6px;
+    }
+
+    .floating-btn {
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.7);
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+        }
+    }
+
+    /* Resize handles */
+    .resize-handle {
+        position: absolute;
+        z-index: 10;
+    }
+
+    .resize-n, .resize-s {
+        left: 8px;
+        right: 8px;
+        height: 6px;
+        cursor: ns-resize;
+    }
+
+    .resize-n { top: 0; }
+    .resize-s { bottom: 0; }
+
+    .resize-e, .resize-w {
+        top: 8px;
+        bottom: 8px;
+        width: 6px;
+        cursor: ew-resize;
+    }
+
+    .resize-e { right: 0; }
+    .resize-w { left: 0; }
+
+    .resize-ne, .resize-nw, .resize-se, .resize-sw {
+        width: 12px;
+        height: 12px;
+    }
+
+    .resize-ne { top: 0; right: 0; cursor: nesw-resize; }
+    .resize-nw { top: 0; left: 0; cursor: nwse-resize; }
+    .resize-se { bottom: 0; right: 0; cursor: nwse-resize; }
+    .resize-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+    /* Setting toggle buttons */
+    .setting-toggle {
+        display: flex;
+        gap: 4px;
+    }
+
+    .toggle-btn {
+        flex: 1;
+        padding: 8px 12px;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        color: rgba(255, 255, 255, 0.7);
+        cursor: pointer;
+        font-size: 12px;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        &.active {
+            background: #3498db;
+            border-color: #3498db;
+            color: white;
+        }
+    }
+
     .tabs {
         display: flex;
         padding: 0 10px;

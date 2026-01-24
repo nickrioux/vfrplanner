@@ -3,6 +3,7 @@
  * Exports all service modules for cleaner imports
  */
 
+export * from './logger';
 export * from './navigationCalc';
 export * from './elevationService';
 export * from './weatherService';
