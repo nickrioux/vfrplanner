@@ -1350,16 +1350,19 @@ export async function fetchFlightPlanWeather(
  * @param weather - Weather data for the waypoint
  * @param thresholds - Alert thresholds
  * @param plannedAltitude - Planned flight altitude in feet (optional, for altitude conflict check)
+ * @param isTerminal - True if this is a departure or arrival waypoint (wind/gust alerts only apply to terminals)
  */
 export function checkWeatherAlerts(
     weather: WaypointWeather,
     thresholds: WeatherAlertThresholds = DEFAULT_ALERT_THRESHOLDS,
-    plannedAltitude?: number
+    plannedAltitude?: number,
+    isTerminal: boolean = false
 ): WeatherAlert[] {
     const alerts: WeatherAlert[] = [];
 
-    // Wind speed alert
-    if (weather.windSpeed >= thresholds.windSpeed) {
+    // Wind speed alert - only for terminal waypoints (departure/arrival)
+    // Enroute wind at altitude affects ground speed, not safety
+    if (isTerminal && weather.windSpeed >= thresholds.windSpeed) {
         alerts.push({
             type: 'wind',
             severity: weather.windSpeed >= thresholds.windSpeed * 1.5 ? 'warning' : 'caution',
@@ -1369,8 +1372,8 @@ export function checkWeatherAlerts(
         });
     }
 
-    // Gust alert
-    if (weather.windGust && weather.windGust >= thresholds.gustSpeed) {
+    // Gust alert - only for terminal waypoints (departure/arrival)
+    if (isTerminal && weather.windGust && weather.windGust >= thresholds.gustSpeed) {
         alerts.push({
             type: 'gust',
             severity: weather.windGust >= thresholds.gustSpeed * 1.3 ? 'warning' : 'caution',
