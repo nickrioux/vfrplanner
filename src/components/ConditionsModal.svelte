@@ -385,10 +385,23 @@
         font-size: 24px;
         cursor: pointer;
         padding: 0;
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         line-height: 1;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             color: #e0e0e0;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -421,6 +434,7 @@
         gap: 8px;
         width: 100%;
         padding: 10px 12px;
+        min-height: 44px;
         background: #252525;
         border: none;
         color: #e0e0e0;
@@ -428,9 +442,17 @@
         font-weight: 500;
         cursor: pointer;
         text-align: left;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: #2a2a2a;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.5);
+            outline-offset: -2px;
         }
     }
 
@@ -494,16 +516,20 @@
         input {
             width: 100%;
             padding: 6px 8px;
+            min-height: 44px;
             border: 1px solid #444;
             border-radius: 4px;
             background: #2a2a2a;
             color: #fff;
             font-size: 13px;
             text-align: center;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
 
             &:focus {
                 outline: none;
                 border-color: #4a90d9;
+                box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.2);
             }
 
             &::-webkit-inner-spin-button,
@@ -545,12 +571,15 @@
 
     .btn {
         padding: 8px 16px;
+        min-height: 44px;
         border-radius: 4px;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
         border: none;
         transition: background 0.2s, opacity 0.2s;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:disabled {
             opacity: 0.5;
@@ -562,8 +591,14 @@
         background: #333;
         color: #c0c0c0;
 
-        &:hover:not(:disabled) {
+        &:hover:not(:disabled),
+        &:active:not(:disabled) {
             background: #444;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -571,8 +606,14 @@
         background: #444;
         color: #e0e0e0;
 
-        &:hover:not(:disabled) {
+        &:hover:not(:disabled),
+        &:active:not(:disabled) {
             background: #555;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -580,8 +621,14 @@
         background: #4a90d9;
         color: #fff;
 
-        &:hover:not(:disabled) {
+        &:hover:not(:disabled),
+        &:active:not(:disabled) {
             background: #5a9ee9;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.7);
+            outline-offset: 2px;
         }
     }
 </style>
