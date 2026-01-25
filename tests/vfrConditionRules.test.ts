@@ -6,8 +6,10 @@ import {
     evaluateAllRules,
     VFR_CONDITION_RULES,
     VFR_THRESHOLDS,
+    buildRulesFromThresholds,
+    STANDARD_THRESHOLDS,
+    CONSERVATIVE_THRESHOLDS,
     type ConditionCriteria,
-    type VFRConditionRule,
 } from '../src/services/vfrConditionRules';
 
 describe('VFR Condition Rules', () => {
@@ -222,6 +224,50 @@ describe('VFR Condition Rules', () => {
             const rule = VFR_CONDITION_RULES.find(r => r.id === 'visibility')!;
             expect(VFR_THRESHOLDS.visibility.poor).toBe(rule.poorThreshold);
             expect(VFR_THRESHOLDS.visibility.marginal).toBe(rule.marginalThreshold);
+        });
+    });
+
+    describe('buildRulesFromThresholds', () => {
+        it('builds rules with standard thresholds matching VFR_CONDITION_RULES', () => {
+            const rules = buildRulesFromThresholds(STANDARD_THRESHOLDS);
+            const windRule = rules.find(r => r.id === 'terminal-wind-speed')!;
+            expect(windRule.poorThreshold).toBe(25);
+            expect(windRule.marginalThreshold).toBe(20);
+        });
+
+        it('builds rules with conservative thresholds', () => {
+            const rules = buildRulesFromThresholds(CONSERVATIVE_THRESHOLDS);
+            const windRule = rules.find(r => r.id === 'terminal-wind-speed')!;
+            expect(windRule.poorThreshold).toBe(20);
+            expect(windRule.marginalThreshold).toBe(15);
+        });
+
+        it('builds all 9 rules', () => {
+            const rules = buildRulesFromThresholds(STANDARD_THRESHOLDS);
+            expect(rules).toHaveLength(9);
+        });
+
+        it('negates tailwind thresholds correctly', () => {
+            const rules = buildRulesFromThresholds(STANDARD_THRESHOLDS);
+            const tailwindRule = rules.find(r => r.id === 'tailwind')!;
+            // Standard tailwind: poor=15, marginal=10 stored as positive
+            // But rules use negative values for lt comparison
+            expect(tailwindRule.poorThreshold).toBe(-15);
+            expect(tailwindRule.marginalThreshold).toBe(-10);
+        });
+
+        it('builds rules with all expected IDs', () => {
+            const rules = buildRulesFromThresholds(STANDARD_THRESHOLDS);
+            const ruleIds = rules.map(r => r.id);
+            expect(ruleIds).toContain('terminal-wind-speed');
+            expect(ruleIds).toContain('terminal-gust');
+            expect(ruleIds).toContain('crosswind');
+            expect(ruleIds).toContain('tailwind');
+            expect(ruleIds).toContain('cloud-base-agl');
+            expect(ruleIds).toContain('visibility');
+            expect(ruleIds).toContain('precipitation');
+            expect(ruleIds).toContain('terrain-clearance');
+            expect(ruleIds).toContain('cloud-clearance');
         });
     });
 
