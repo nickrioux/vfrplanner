@@ -384,14 +384,18 @@ export function evaluateRule(
  * Evaluate all rules and aggregate results
  * @param criteria - The criteria values
  * @param isTerminal - Whether this is a terminal waypoint
- * @param rules - Optional custom rules (defaults to VFR_CONDITION_RULES)
+ * @param thresholds - Optional custom thresholds (defaults to standard VFR_CONDITION_RULES)
  * @returns Aggregated condition and list of reasons
  */
 export function evaluateAllRules(
     criteria: ConditionCriteria,
     isTerminal: boolean,
-    rules: VFRConditionRule[] = VFR_CONDITION_RULES
+    thresholds?: VfrConditionThresholds
 ): { condition: SegmentCondition; reasons: string[] } {
+    const rules = thresholds
+        ? buildRulesFromThresholds(thresholds)
+        : VFR_CONDITION_RULES;
+
     const reasons: string[] = [];
     let hasPoor = false;
     let hasMarginal = false;
