@@ -552,7 +552,8 @@
 
     <!-- Settings Tab -->
     {#if activeTab === 'settings' && flightPlan}
-        <div class="settings-section">
+        <!-- Window Mode toggle (kept separate from SettingsPanel) -->
+        <div class="settings-section window-mode-section">
             <div class="setting-group">
                 <label class="setting-label">Window Mode</label>
                 <div class="setting-toggle">
@@ -571,153 +572,19 @@
                     Panel mode uses Windy's right-hand pane. Floating mode creates a draggable, resizable window.
                 </div>
             </div>
-
-            <div class="setting-group">
-                <label class="setting-label">Default Airspeed (TAS)</label>
-                <div class="setting-input">
-                    <input
-                        type="number"
-                        bind:value={settings.defaultAirspeed}
-                        on:change={handleSettingsChange}
-                        min="50"
-                        max="500"
-                    />
-                    <span class="unit">kt</span>
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-label">Default Altitude</label>
-                <div class="setting-input">
-                    <input
-                        type="number"
-                        bind:value={settings.defaultAltitude}
-                        on:change={handleSettingsChange}
-                        min="0"
-                        max="45000"
-                        step="500"
-                    />
-                    <span class="unit">ft</span>
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-checkbox">
-                    <input
-                        type="checkbox"
-                        bind:checked={settings.autoTerrainElevation}
-                        on:change={handleSettingsChange}
-                    />
-                    Auto terrain elevation for departure/arrival
-                </label>
-                <div class="setting-description">
-                    Automatically fetch terrain elevation for first and last waypoints when importing or creating a flight plan.
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-checkbox">
-                    <input
-                        type="checkbox"
-                        bind:checked={settings.showLabels}
-                        on:change={handleSettingsChange}
-                    />
-                    Show waypoint labels on map
-                </label>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-checkbox">
-                    <input
-                        type="checkbox"
-                        bind:checked={settings.includeNightFlights}
-                        on:change={handleSettingsChange}
-                    />
-                    Include night hours in VFR window search
-                </label>
-                <div class="setting-description">
-                    When disabled, VFR windows are limited to 30 min before sunrise to 30 min after sunset.
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-label">Max VFR Windows</label>
-                <div class="setting-input">
-                    <input
-                        type="number"
-                        bind:value={settings.maxVFRWindows}
-                        on:change={handleSettingsChange}
-                        min="1"
-                        max="50"
-                    />
-                </div>
-                <div class="setting-description">
-                    Maximum number of VFR windows to find when searching (up to 10 days forecast).
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-label">Terrain Sample Interval</label>
-                <div class="setting-input">
-                    <input
-                        type="number"
-                        bind:value={settings.terrainSampleInterval}
-                        on:change={handleSettingsChange}
-                        min="1"
-                        max="10"
-                        step="0.5"
-                    />
-                    <span class="unit">NM</span>
-                </div>
-                <div class="setting-description">
-                    Distance between terrain elevation samples. Lower = more detail, but slower.
-                    <br/>Current: {settings.terrainSampleInterval} NM interval will fetch ~{Math.ceil((flightPlan.totals.distance || 0) / settings.terrainSampleInterval) + flightPlan.waypoints.length} elevation points
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-label">Profile Top Height</label>
-                <div class="setting-input">
-                    <input
-                        type="number"
-                        bind:value={maxProfileAltitude}
-                        min="1000"
-                        max="60000"
-                        step="1000"
-                    />
-                    <span class="unit">ft MSL</span>
-                </div>
-                <div class="setting-description">
-                    Maximum altitude displayed on the altitude profile graph.
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-label">AirportDB API Key</label>
-                <input
-                    type="password"
-                    class="setting-input api-key-input"
-                    bind:value={settings.airportdbApiKey}
-                    on:change={handleSettingsChange}
-                    placeholder="Enter your API key"
-                />
-                <div class="setting-description">
-                    Required for airport search by ICAO code. Get a free key at
-                    <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
-                </div>
-            </div>
-
-            <div class="setting-group">
-                <label class="setting-checkbox">
-                    <input
-                        type="checkbox"
-                        bind:checked={settings.enableLogging}
-                        on:change={handleSettingsChange}
-                    />
-                    Enable debug logging
-                </label>
-            </div>
         </div>
+
+        <!-- Settings Panel Component -->
+        <SettingsPanel
+            bind:settings
+            bind:maxProfileAltitude
+            {flightPlan}
+            conditionPreset={settings.conditionPreset}
+            on:change={handleSettingsChange}
+            on:profileAltitudeChange={handleProfileAltitudeChange}
+            on:openConditionsModal={handleOpenConditionsModal}
+            on:presetChange={handlePresetChange}
+        />
     {/if}
 
     <!-- About Tab -->
@@ -775,6 +642,14 @@
         <div class="resize-handle resize-se" on:mousedown={(e) => startResize(e, 'se')}></div>
         <div class="resize-handle resize-sw" on:mousedown={(e) => startResize(e, 'sw')}></div>
     {/if}
+
+    <!-- Conditions Modal -->
+    <ConditionsModal
+        visible={showConditionsModal}
+        thresholds={settings.customThresholds}
+        on:save={handleConditionsSave}
+        on:cancel={handleConditionsCancel}
+    />
 </section>
 
 <script lang="ts">
@@ -818,8 +693,10 @@
     } from './services/airportdbService';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo, FloatingWindowState } from './types';
     import { DEFAULT_SETTINGS, DEFAULT_FLOATING_WINDOW } from './types';
-    import { getThresholdsForPreset } from './types/conditionThresholds';
+    import { getThresholdsForPreset, type VfrConditionThresholds, type ConditionPreset } from './types/conditionThresholds';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
+    import SettingsPanel from './components/SettingsPanel.svelte';
+    import ConditionsModal from './components/ConditionsModal.svelte';
 
     import type { LatLon } from '@windy/interfaces';
 
@@ -839,6 +716,9 @@
     let error: string | null = null;
     let fileInput: HTMLInputElement;
     let activeTab: 'route' | 'profile' | 'settings' = 'route';
+
+    // Conditions modal state
+    let showConditionsModal = false;
 
     // AirportDB search state
     let searchQuery = '';
@@ -1838,6 +1718,34 @@
 
         updateMapLayers();
         saveSession();
+    }
+
+    function handleOpenConditionsModal() {
+        showConditionsModal = true;
+    }
+
+    function handleConditionsSave(event: CustomEvent<VfrConditionThresholds>) {
+        settings.customThresholds = event.detail;
+        settings.conditionPreset = 'custom';
+        showConditionsModal = false;
+        // Trigger re-render and save
+        handleSettingsChange();
+    }
+
+    function handleConditionsCancel() {
+        showConditionsModal = false;
+    }
+
+    function handlePresetChange(event: CustomEvent<ConditionPreset>) {
+        settings.conditionPreset = event.detail;
+        if (event.detail !== 'custom') {
+            settings.customThresholds = { ...getThresholdsForPreset(event.detail) };
+        }
+        handleSettingsChange();
+    }
+
+    function handleProfileAltitudeChange(event: CustomEvent<number>) {
+        maxProfileAltitude = event.detail;
     }
 
     // ===== Floating Window Functions =====
