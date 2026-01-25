@@ -3027,26 +3027,40 @@
 
     .floating-controls {
         display: flex;
-        gap: 6px;
+        gap: 4px;
     }
 
     .floating-btn {
-        width: 24px;
-        height: 24px;
+        min-width: 44px;
+        min-height: 44px;
+        width: 44px;
+        height: 44px;
         display: flex;
         align-items: center;
         justify-content: center;
         background: rgba(255, 255, 255, 0.1);
         border: none;
-        border-radius: 4px;
+        border-radius: 6px;
         color: rgba(255, 255, 255, 0.7);
         cursor: pointer;
-        font-size: 14px;
+        font-size: 16px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.2);
             color: white;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(255, 255, 255, 0.5);
+            outline-offset: 2px;
+        }
+
+        &:focus:not(:focus-visible) {
+            outline: none;
         }
     }
 
