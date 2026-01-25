@@ -818,6 +818,7 @@
     } from './services/airportdbService';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo, FloatingWindowState } from './types';
     import { DEFAULT_SETTINGS, DEFAULT_FLOATING_WINDOW } from './types';
+    import { getThresholdsForPreset } from './types/conditionThresholds';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
 
     import type { LatLon } from '@windy/interfaces';
@@ -2597,11 +2598,13 @@
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
 
         // Calculate profile data to get segment conditions
+        const thresholds = getThresholdsForPreset(settings.conditionPreset, settings.customThresholds);
         const profileData = calculateProfileData(
             flightPlan.waypoints,
             weatherData,
             flightPlan.aircraft.defaultAltitude,
-            elevationProfile
+            elevationProfile,
+            thresholds
         );
 
         // Create route with color-coded segments

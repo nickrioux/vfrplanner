@@ -335,13 +335,15 @@ function interpolateAltitude(distance: number, waypoints: Waypoint[], defaultAlt
  * @param weatherData - Map of waypoint ID to weather data
  * @param defaultAltitude - Default altitude in feet (from flight plan aircraft profile)
  * @param elevationProfile - Optional array of elevation points from terrain sampling
+ * @param thresholds - Optional custom VFR condition thresholds (uses defaults if not provided)
  * @returns Array of profile data points
  */
 export function calculateProfileData(
     waypoints: Waypoint[],
     weatherData: Map<string, WaypointWeather>,
     defaultAltitude: number = 3000,
-    elevationProfile: ElevationPoint[] = []
+    elevationProfile: ElevationPoint[] = [],
+    thresholds?: VfrConditionThresholds
 ): ProfileDataPoint[] {
     if (waypoints.length === 0) {
         return [];
@@ -447,7 +449,7 @@ export function calculateProfileData(
             // Evaluate segment condition only for waypoints
             if (isWaypoint && wp) {
                 const isTerminal = elevPoint.waypointIndex === 0 || elevPoint.waypointIndex === waypoints.length - 1;
-                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
+                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp, thresholds);
                 point.condition = conditionResult.condition;
                 point.conditionReasons = conditionResult.reasons;
             }
@@ -515,7 +517,7 @@ export function calculateProfileData(
             };
 
             const isTerminal = index === 0 || index === waypoints.length - 1;
-            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
+            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp, thresholds);
             point.condition = conditionResult.condition;
             point.conditionReasons = conditionResult.reasons;
 
