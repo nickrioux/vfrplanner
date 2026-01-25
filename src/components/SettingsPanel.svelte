@@ -285,7 +285,8 @@
             color: #4a90d9;
             text-decoration: none;
 
-            &:hover {
+            &:hover,
+            &:active {
                 text-decoration: underline;
             }
         }
@@ -326,16 +327,25 @@
     .customize-btn {
         margin-top: 8px;
         padding: 6px 12px;
+        min-height: 44px;
         background: #333;
         border: 1px solid #555;
         border-radius: 4px;
         color: #ccc;
         font-size: 13px;
         cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: #444;
             color: #fff;
+        }
+
+        &:focus {
+            outline: 2px solid rgba(74, 144, 217, 0.5);
+            outline-offset: 2px;
         }
     }
 

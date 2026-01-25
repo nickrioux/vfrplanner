@@ -3206,7 +3206,8 @@
         font-size: 12px;
         transition: all 0.15s ease;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.15);
         }
 
@@ -3227,6 +3228,7 @@
     .tab {
         flex: 1;
         padding: 8px 12px;
+        min-height: 44px;
         background: rgba(255, 255, 255, 0.05);
         border: none;
         border-radius: 4px;
@@ -3234,9 +3236,21 @@
         cursor: pointer;
         font-size: 13px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
+        }
+
+        &:focus:not(:focus-visible) {
+            outline: none;
         }
 
         &.active {
@@ -3278,8 +3292,14 @@
             background: rgba(52, 152, 219, 0.1);
         }
 
-        &:hover {
+        &:hover,
+        &:active {
             border-color: rgba(255, 255, 255, 0.5);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3364,11 +3384,22 @@
         color: #3498db;
         cursor: pointer;
         padding: 2px 6px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
         border-radius: 4px;
         transition: background 0.2s;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3645,15 +3676,32 @@
         background: rgba(255, 255, 255, 0.05);
         border-radius: 4px;
         border-left: 3px solid #757575;
+        min-height: 44px;
+        transition: background 0.15s ease;
+
+        &:hover,
+        &:active {
+            background: rgba(255, 255, 255, 0.1);
+        }
 
         &.good {
             border-left-color: #4caf50;
             background: rgba(76, 175, 80, 0.1);
+
+            &:hover,
+            &:active {
+                background: rgba(76, 175, 80, 0.15);
+            }
         }
 
         &.marginal {
             border-left-color: #ff9800;
             background: rgba(255, 152, 0, 0.1);
+
+            &:hover,
+            &:active {
+                background: rgba(255, 152, 0, 0.15);
+            }
         }
     }
 
@@ -3793,6 +3841,7 @@
     .btn-search-toggle {
         width: 100%;
         padding: 10px 15px;
+        min-height: 44px;
         background: rgba(52, 152, 219, 0.2);
         border: 1px solid rgba(52, 152, 219, 0.5);
         border-radius: 6px;
@@ -3800,9 +3849,21 @@
         cursor: pointer;
         font-size: 13px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(52, 152, 219, 0.3);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
+        }
+
+        &:focus:not(:focus-visible) {
+            outline: none;
         }
 
         &.active {
@@ -3893,12 +3954,21 @@
         align-items: center;
         gap: 8px;
         padding: 8px 10px;
+        min-height: 44px;
         cursor: pointer;
         transition: background 0.15s;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(52, 152, 219, 0.2);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: -2px;
         }
 
         &:last-child {
@@ -3935,6 +4005,8 @@
 
     .btn-add-result {
         padding: 2px 8px;
+        min-height: 44px;
+        min-width: 44px;
         background: rgba(39, 174, 96, 0.3);
         border: 1px solid #27ae60;
         border-radius: 3px;
@@ -3942,9 +4014,17 @@
         cursor: pointer;
         font-size: 14px;
         font-weight: bold;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(39, 174, 96, 0.5);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(39, 174, 96, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3989,16 +4069,25 @@
         display: flex;
         align-items: center;
         padding: 8px 4px;
+        min-height: 44px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
         cursor: pointer;
         transition: background 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.05);
 
             .btn-move, .btn-delete {
                 opacity: 1;
             }
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: -2px;
         }
 
         &.selected {
@@ -4036,11 +4125,22 @@
     .wp-name-text {
         cursor: pointer;
         padding: 2px 4px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
         border-radius: 3px;
         transition: background 0.2s;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -4154,11 +4254,22 @@
     .wp-altitude-text {
         cursor: pointer;
         padding: 1px 4px;
+        min-height: 44px;
+        display: inline-flex;
+        align-items: center;
         border-radius: 3px;
         transition: background 0.2s;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             background: rgba(255, 255, 255, 0.1);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
 
         &.is-custom {
@@ -4200,8 +4311,11 @@
         cursor: pointer;
         text-decoration: underline;
         opacity: 0.9;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
-        &:hover {
+        &:hover,
+        &:active {
             opacity: 1;
             color: #3498db;
         }
@@ -4483,7 +4597,8 @@
             color: #3498db;
             text-decoration: none;
 
-            &:hover {
+            &:hover,
+            &:active {
                 text-decoration: underline;
             }
         }
@@ -4516,7 +4631,8 @@
             color: #3498db;
             text-decoration: none;
 
-            &:hover {
+            &:hover,
+            &:active {
                 text-decoration: underline;
             }
         }
