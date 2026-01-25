@@ -5,11 +5,13 @@
 
 import type { Waypoint, RunwayInfo } from '../types/flightPlan';
 import type { WaypointWeather, LevelWind } from './weatherService';
+import type { VfrConditionThresholds } from '../types/conditionThresholds';
 import { calculateHeadwindComponent, calculateWindComponents, type WindComponents } from './navigationCalc';
 import { logger } from './logger';
 import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
 import { interpolateWindBetweenWaypoints, interpolateBearing } from '../utils/interpolation';
 import { metersToFeet } from '../utils/units';
+import { evaluateAllRules, type ConditionCriteria } from './vfrConditionRules';
 
 /**
  * Estimate cloud top from cloud base
@@ -176,7 +178,8 @@ export function evaluateSegmentCondition(
     flightAltitude: number,
     wx?: WaypointWeather,
     isTerminal: boolean = false,
-    waypoint?: Waypoint
+    waypoint?: Waypoint,
+    thresholds?: VfrConditionThresholds
 ): { condition: SegmentCondition; reasons: string[]; bestRunway?: BestRunwayResult } {
     const reasons: string[] = [];
 
@@ -213,7 +216,10 @@ export function evaluateSegmentCondition(
         }
     }
 
-    // Collect criteria for evaluation
+    // Initialize best runway for terminal waypoints
+    let bestRunway: BestRunwayResult | undefined;
+
+    // Collect base criteria for evaluation
     const criteria: ConditionCriteria = {
         windSpeed: point.windSpeed,
         gustSpeed,
@@ -224,151 +230,47 @@ export function evaluateSegmentCondition(
         cloudClearance: cloudClearance ?? 999999, // Use very high value for clear sky
     };
 
-    // Evaluate conditions - Red (Poor) takes priority
-    let isPoor = false;
-    let isMarginal = false;
-    let bestRunway: BestRunwayResult | undefined;
-
-    // Wind speed and crosswind checks - ONLY for departure/arrival waypoints
+    // For terminal waypoints, calculate surface wind and runway components
     // High winds and gusts are primarily a concern for takeoff and landing operations
-    // Use SURFACE wind for terminal operations, not altitude wind
     if (isTerminal && wx) {
         const terminalWindSpeed = wx.surfaceWindSpeed ?? criteria.windSpeed;
         const terminalWindDir = wx.surfaceWindDir ?? point.windDir;
 
+        // Add terminal wind speed to criteria
+        criteria.terminalWindSpeed = terminalWindSpeed;
+        criteria.terminalWindDir = terminalWindDir;
+
         logger.debug(`[VFR Runway] Terminal waypoint: ${waypoint?.name}, hasRunways: ${!!waypoint?.runways}, count: ${waypoint?.runways?.length ?? 0}`);
         logger.debug(`[VFR Runway] Surface wind: ${Math.round(terminalWindDir)}° @ ${Math.round(terminalWindSpeed)}kt`);
 
-        // Calculate crosswind if runway data is available
+        // Calculate crosswind/headwind if runway data is available
         if (waypoint?.runways && waypoint.runways.length > 0) {
             logger.debug(`[VFR Runway] Runways available:`, waypoint.runways.map(r => `${r.lowEnd.ident}/${r.highEnd.ident} (${r.lowEnd.headingTrue}°/${r.highEnd.headingTrue}°)`));
             bestRunway = findBestRunway(waypoint.runways, terminalWindDir, terminalWindSpeed) ?? undefined;
 
             if (bestRunway) {
                 logger.debug(`[VFR Runway] Best runway: ${bestRunway.runwayIdent}, crosswind: ${Math.round(bestRunway.crosswindKt)}kt, headwind: ${Math.round(bestRunway.headwindKt)}kt`);
-                // Crosswind limits (typical light aircraft limits)
-                // > 15kt crosswind is challenging, > 20kt is dangerous for most pilots
-                if (bestRunway.crosswindKt > 20) {
-                    reasons.push(`High crosswind Rwy ${bestRunway.runwayIdent} (${Math.round(bestRunway.crosswindKt)}kt)`);
-                    isPoor = true;
-                } else if (bestRunway.crosswindKt > 15) {
-                    reasons.push(`Crosswind Rwy ${bestRunway.runwayIdent} (${Math.round(bestRunway.crosswindKt)}kt)`);
-                    isMarginal = true;
-                }
-
-                // Tailwind check (> 10kt tailwind is a concern)
-                if (bestRunway.headwindKt < -10) {
-                    reasons.push(`Tailwind Rwy ${bestRunway.runwayIdent} (${Math.round(Math.abs(bestRunway.headwindKt))}kt)`);
-                    isMarginal = true;
-                }
-            }
-        }
-
-        // Overall wind speed check
-        if (terminalWindSpeed > 25) {
-            reasons.push(`High surface wind (${Math.round(terminalWindSpeed)}kt)`);
-            isPoor = true;
-        } else if (terminalWindSpeed > 20) {
-            reasons.push(`Elevated surface wind (${Math.round(terminalWindSpeed)}kt)`);
-            isMarginal = true;
-        }
-
-        // Gust checks (already surface-based)
-        if (criteria.gustSpeed !== undefined) {
-            if (criteria.gustSpeed > 35) {
-                reasons.push(`High gusts (${Math.round(criteria.gustSpeed)}kt)`);
-                isPoor = true;
-            } else if (criteria.gustSpeed > 30) {
-                reasons.push(`Elevated gusts (${Math.round(criteria.gustSpeed)}kt)`);
-                isMarginal = true;
+                // Add runway wind components to criteria for rules evaluation
+                criteria.crosswindKt = bestRunway.crosswindKt;
+                criteria.headwindKt = bestRunway.headwindKt;
             }
         }
     }
 
-    // Cloud base AGL checks - ONLY when clouds are present
-    // If cloudBase is undefined, it means clear sky (no cloud issues)
-    if (cloudBaseAGL !== undefined) {
-        if (criteria.cloudBaseAGL < 1500) {
-            reasons.push(`Low ceiling (${Math.round(criteria.cloudBaseAGL)}ft AGL)`);
-            isPoor = true;
-        } else if (criteria.cloudBaseAGL < 2000) {
-            reasons.push(`Marginal ceiling (${Math.round(criteria.cloudBaseAGL)}ft AGL)`);
-            isMarginal = true;
-        }
-    }
+    // Use rules-based evaluation with thresholds
+    const ruleResult = evaluateAllRules(criteria, isTerminal, thresholds);
 
-    // Visibility checks
-    if (criteria.visibility < 5) {
-        reasons.push(`Low visibility (${criteria.visibility.toFixed(1)}km)`);
-        isPoor = true;
-    } else if (criteria.visibility < 8) {
-        reasons.push(`Reduced visibility (${criteria.visibility.toFixed(1)}km)`);
-        isMarginal = true;
-    }
-
-    // Precipitation checks
-    if (criteria.precipitation > 5) {
-        reasons.push(`Heavy precipitation (${criteria.precipitation.toFixed(1)}mm)`);
-        isPoor = true;
-    } else if (criteria.precipitation > 2) {
-        reasons.push(`Moderate precipitation (${criteria.precipitation.toFixed(1)}mm)`);
-        isMarginal = true;
-    }
-
-    // Terrain clearance checks - SKIP for terminal waypoints (departure/arrival)
-    // At departure the aircraft is on the ground, at arrival it will descend to ground level
-    if (!isTerminal) {
-        if (criteria.terrainClearance < 500) {
-            reasons.push(`Low terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
-            isPoor = true;
-        } else if (criteria.terrainClearance < 1000) {
-            reasons.push(`Marginal terrain clearance (${Math.round(criteria.terrainClearance)}ft)`);
-            isMarginal = true;
-        }
-    }
-
-    // Cloud clearance checks - ONLY when clouds are present
-    // If cloudClearance is undefined, it means clear sky (no cloud clearance issues)
-    if (cloudClearance !== undefined) {
-        if (criteria.cloudClearance < 200) {
-            reasons.push(`Insufficient cloud clearance (${Math.round(criteria.cloudClearance)}ft)`);
-            isPoor = true;
-        } else if (criteria.cloudClearance < 500) {
-            reasons.push(`Marginal cloud clearance (${Math.round(criteria.cloudClearance)}ft)`);
-            isMarginal = true;
-        }
-    }
-
-    // Determine final condition
-    if (isPoor) {
-        return { condition: 'poor', reasons, bestRunway };
-    }
-
-    if (isMarginal) {
-        return { condition: 'marginal', reasons, bestRunway };
-    }
-
-    // All checks passed - Good VFR
-    return { condition: 'good', reasons: [], bestRunway };
+    return {
+        condition: ruleResult.condition,
+        reasons: ruleResult.reasons,
+        bestRunway,
+    };
 }
 
 /**
  * Segment condition types for VFR flight conditions
  */
 export type SegmentCondition = 'good' | 'marginal' | 'poor' | 'unknown';
-
-/**
- * Condition criteria used for evaluation
- */
-export interface ConditionCriteria {
-    windSpeed: number;
-    gustSpeed?: number;
-    cloudBaseAGL: number;
-    visibility: number;
-    precipitation: number;
-    terrainClearance: number;
-    cloudClearance: number;
-}
 
 /**
  * Profile data point interface
@@ -433,13 +335,15 @@ function interpolateAltitude(distance: number, waypoints: Waypoint[], defaultAlt
  * @param weatherData - Map of waypoint ID to weather data
  * @param defaultAltitude - Default altitude in feet (from flight plan aircraft profile)
  * @param elevationProfile - Optional array of elevation points from terrain sampling
+ * @param thresholds - Optional custom VFR condition thresholds (uses defaults if not provided)
  * @returns Array of profile data points
  */
 export function calculateProfileData(
     waypoints: Waypoint[],
     weatherData: Map<string, WaypointWeather>,
     defaultAltitude: number = 3000,
-    elevationProfile: ElevationPoint[] = []
+    elevationProfile: ElevationPoint[] = [],
+    thresholds?: VfrConditionThresholds
 ): ProfileDataPoint[] {
     if (waypoints.length === 0) {
         return [];
@@ -545,7 +449,7 @@ export function calculateProfileData(
             // Evaluate segment condition only for waypoints
             if (isWaypoint && wp) {
                 const isTerminal = elevPoint.waypointIndex === 0 || elevPoint.waypointIndex === waypoints.length - 1;
-                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
+                const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp, thresholds);
                 point.condition = conditionResult.condition;
                 point.conditionReasons = conditionResult.reasons;
             }
@@ -613,7 +517,7 @@ export function calculateProfileData(
             };
 
             const isTerminal = index === 0 || index === waypoints.length - 1;
-            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp);
+            const conditionResult = evaluateSegmentCondition(point, altitude, wx, isTerminal, wp, thresholds);
             point.condition = conditionResult.condition;
             point.conditionReasons = conditionResult.reasons;
 

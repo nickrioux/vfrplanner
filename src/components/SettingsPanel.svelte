@@ -1,14 +1,18 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
     import type { PluginSettings, FlightPlan } from '../types';
+    import type { ConditionPreset } from '../types/conditionThresholds';
 
     export let settings: PluginSettings;
     export let maxProfileAltitude: number;
     export let flightPlan: FlightPlan | null;
+    export let conditionPreset: ConditionPreset;
 
     const dispatch = createEventDispatcher<{
         change: void;
         profileAltitudeChange: number;
+        openConditionsModal: void;
+        presetChange: ConditionPreset;
     }>();
 
     function handleChange() {
@@ -19,11 +23,39 @@
         dispatch('profileAltitudeChange', maxProfileAltitude);
     }
 
+    function handlePresetChange() {
+        dispatch('presetChange', conditionPreset);
+        dispatch('change');
+    }
+
+    function handleOpenModal() {
+        dispatch('openConditionsModal');
+    }
+
     $: totalDistance = flightPlan?.totals.distance || 0;
     $: estimatedSamples = Math.ceil(totalDistance / settings.terrainSampleInterval) + (flightPlan?.waypoints.length || 0);
 </script>
 
 <div class="settings-section">
+    <div class="setting-group">
+        <label class="setting-label">VFR Condition Thresholds</label>
+        <div class="setting-input">
+            <select bind:value={conditionPreset} on:change={handlePresetChange}>
+                <option value="standard">Standard VFR</option>
+                <option value="conservative">Conservative</option>
+                <option value="custom">Custom</option>
+            </select>
+        </div>
+        <div class="setting-description">
+            Defines ceiling, visibility, wind and clearance limits for profile coloring.
+        </div>
+        <button class="customize-btn" on:click={handleOpenModal}>
+            Customize...
+        </button>
+    </div>
+
+    <div class="setting-divider"></div>
+
     <div class="setting-group">
         <label class="setting-label">Default Airspeed (TAS)</label>
         <div class="setting-input">
@@ -208,6 +240,21 @@
             }
         }
 
+        select {
+            padding: 5px 8px;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #2a2a2a;
+            color: #fff;
+            font-size: 14px;
+            cursor: pointer;
+
+            &:focus {
+                outline: none;
+                border-color: #4a90d9;
+            }
+        }
+
         .unit {
             color: #888;
             font-size: 13px;
@@ -274,5 +321,27 @@
             font-size: 12px;
             color: #888;
         }
+    }
+
+    .customize-btn {
+        margin-top: 8px;
+        padding: 6px 12px;
+        background: #333;
+        border: 1px solid #555;
+        border-radius: 4px;
+        color: #ccc;
+        font-size: 13px;
+        cursor: pointer;
+
+        &:hover {
+            background: #444;
+            color: #fff;
+        }
+    }
+
+    .setting-divider {
+        height: 1px;
+        background: #333;
+        margin: 15px 0;
     }
 </style>

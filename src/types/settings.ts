@@ -2,6 +2,9 @@
  * Plugin settings types
  */
 
+import type { VfrConditionThresholds, ConditionPreset } from './conditionThresholds';
+import { STANDARD_THRESHOLDS } from './conditionThresholds';
+
 export type WindowMode = 'panel' | 'floating';
 
 export interface FloatingWindowState {
@@ -44,6 +47,10 @@ export interface PluginSettings {
     distanceUnit: 'nm' | 'km' | 'mi';
     altitudeUnit: 'ft' | 'm';
     speedUnit: 'kt' | 'kmh' | 'mph';
+
+    // VFR Condition thresholds
+    conditionPreset: ConditionPreset;
+    customThresholds: VfrConditionThresholds;
 }
 
 export const DEFAULT_FLOATING_WINDOW: FloatingWindowState = {
@@ -69,4 +76,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     distanceUnit: 'nm',
     altitudeUnit: 'ft',
     speedUnit: 'kt',
+    conditionPreset: 'standard',
+    customThresholds: { ...STANDARD_THRESHOLDS },
 };
