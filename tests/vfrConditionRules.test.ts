@@ -271,6 +271,39 @@ describe('VFR Condition Rules', () => {
         });
     });
 
+    describe('evaluateAllRules with custom thresholds', () => {
+        it('uses custom thresholds when provided', () => {
+            const customThresholds: typeof STANDARD_THRESHOLDS = {
+                ...STANDARD_THRESHOLDS,
+                visibility: { poor: 10, marginal: 15 }, // Much stricter
+            };
+            const criteria: ConditionCriteria = {
+                ...goodConditions,
+                visibility: 12, // Would be good with standard (marginal=8), marginal with custom (marginal=15)
+            };
+            const result = evaluateAllRules(criteria, false, customThresholds);
+            expect(result.condition).toBe('marginal');
+        });
+
+        it('uses default rules when thresholds not provided', () => {
+            const criteria: ConditionCriteria = {
+                ...goodConditions,
+                visibility: 12, // Good with standard thresholds (marginal=8)
+            };
+            const result = evaluateAllRules(criteria, false);
+            expect(result.condition).toBe('good');
+        });
+
+        it('uses conservative thresholds correctly', () => {
+            const criteria: ConditionCriteria = {
+                ...goodConditions,
+                visibility: 10, // Good with standard (marginal=8), marginal with conservative (marginal=12)
+            };
+            const result = evaluateAllRules(criteria, false, CONSERVATIVE_THRESHOLDS);
+            expect(result.condition).toBe('marginal');
+        });
+    });
+
     describe('Edge cases', () => {
         it('handles undefined optional values gracefully', () => {
             const criteria: ConditionCriteria = {
