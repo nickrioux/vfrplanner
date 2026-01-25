@@ -16,7 +16,7 @@
 >
     <!-- Floating mode header -->
     {#if settings.windowMode === 'floating'}
-        <div class="floating-header" on:mousedown={startDrag}>
+        <div class="floating-header" on:mousedown={startDrag} on:touchstart={startDrag}>
             <span class="floating-title">✈️ {title}</span>
             <div class="floating-controls">
                 <button class="floating-btn" on:click|stopPropagation={toggleMinimize} title={floatingWindow.minimized ? 'Expand' : 'Minimize'}>
@@ -1750,22 +1750,38 @@
 
     // ===== Floating Window Functions =====
 
-    function startDrag(e: MouseEvent) {
+    function startDrag(e: MouseEvent | TouchEvent) {
         if (settings.windowMode !== 'floating') return;
         isDragging = true;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
+
+        // Get coordinates from touch or mouse event
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+        dragStartX = clientX;
+        dragStartY = clientY;
         windowStartX = floatingWindow.x;
         windowStartY = floatingWindow.y;
+
+        // Add both mouse and touch listeners
         document.addEventListener('mousemove', handleDrag);
         document.addEventListener('mouseup', stopDrag);
+        document.addEventListener('touchmove', handleDrag, { passive: false });
+        document.addEventListener('touchend', stopDrag);
+        document.addEventListener('touchcancel', stopDrag);
         e.preventDefault();
     }
 
-    function handleDrag(e: MouseEvent) {
+    function handleDrag(e: MouseEvent | TouchEvent) {
         if (!isDragging) return;
-        const deltaX = e.clientX - dragStartX;
-        const deltaY = e.clientY - dragStartY;
+        if ('touches' in e && e.touches.length === 0) return;
+
+        // Get coordinates from touch or mouse event
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+        const deltaX = clientX - dragStartX;
+        const deltaY = clientY - dragStartY;
 
         // Calculate new position with bounds checking
         const newX = Math.max(0, Math.min(window.innerWidth - floatingWindow.width, windowStartX + deltaX));
@@ -1773,13 +1789,22 @@
 
         floatingWindow.x = newX;
         floatingWindow.y = newY;
+
+        // Prevent scrolling while dragging on touch devices
+        if ('touches' in e) {
+            e.preventDefault();
+        }
     }
 
     function stopDrag() {
         if (isDragging) {
             isDragging = false;
+            // Remove both mouse and touch listeners
             document.removeEventListener('mousemove', handleDrag);
             document.removeEventListener('mouseup', stopDrag);
+            document.removeEventListener('touchmove', handleDrag);
+            document.removeEventListener('touchend', stopDrag);
+            document.removeEventListener('touchcancel', stopDrag);
             settings.floatingWindow = { ...floatingWindow };
             saveSession();
         }
