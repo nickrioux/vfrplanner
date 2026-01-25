@@ -11,6 +11,7 @@
     class:minimized={settings.windowMode === 'floating' && floatingWindow.minimized}
     class:dragging={isDragging}
     class:resizing={isResizing}
+    class:mobile={isMobile}
     style={settings.windowMode === 'floating' ? `left: ${floatingWindow.x}px; top: ${floatingWindow.y}px; width: ${floatingWindow.width}px; height: ${floatingWindow.minimized ? 'auto' : floatingWindow.height + 'px'};` : ''}
     bind:this={floatingWindowEl}
 >
@@ -754,6 +755,10 @@
     let windowSearchMinCondition: MinimumConditionLevel = 'marginal';
     let vfrWindows: VFRWindow[] | null = null;
     let windowSearchError: string | null = null;
+
+    // Mobile detection state
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+    let isMobile = isTouchDevice || window.innerWidth < 768;
 
     /**
      * Reset route panel state when flight plan changes
@@ -3027,12 +3032,19 @@
         }
     }
 
+    // Window resize handler for mobile detection
+    function handleWindowResize() {
+        isMobile = isTouchDevice || window.innerWidth < 768;
+    }
+
     onMount(() => {
         singleclick.on(name, handleMapClick);
         // Listen to Windy's timeline changes
         store.on('timestamp', handleWindyTimestampChange);
         // Listen for keyboard shortcuts
         window.addEventListener('keydown', handleKeyDown);
+        // Listen for window resize to update mobile state
+        window.addEventListener('resize', handleWindowResize);
     });
 
     onDestroy(() => {
@@ -3042,6 +3054,8 @@
         store.off('timestamp', handleWindyTimestampChange);
         // Clean up keyboard listener
         window.removeEventListener('keydown', handleKeyDown);
+        // Clean up window resize listener
+        window.removeEventListener('resize', handleWindowResize);
     });
 </script>
 
@@ -4730,6 +4744,35 @@
             &:hover,
             &:active {
                 text-decoration: underline;
+            }
+        }
+    }
+
+    /* ===== Mobile-specific Styles ===== */
+    :global(.plugin__content.mobile) {
+        /* Hide resize handles on mobile (use full pane instead) */
+        .resize-handle {
+            display: none;
+        }
+
+        /* Larger touch targets for tabs */
+        .tab {
+            min-height: 48px;
+            font-size: 15px;
+        }
+
+        /* More padding on waypoint rows */
+        .waypoint-row {
+            padding: 12px 4px;
+        }
+
+        /* Stack action buttons vertically on narrow screens */
+        .action-buttons {
+            flex-wrap: wrap;
+
+            .btn-action {
+                flex: 1 1 45%;
+                min-width: 120px;
             }
         }
     }
