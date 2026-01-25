@@ -860,7 +860,10 @@ export async function findVFRWindows(
     let refinementDone = 0;
 
     for (const range of candidateRanges) {
-        if (windows.length >= maxWindows) break;
+        // Note: We don't break early on maxWindows here because the limit should be
+        // applied AFTER daylight filtering (line 983). Breaking early would cause
+        // "Marginal or Better" searches to return fewer windows than "Good only"
+        // when some pre-filter windows span night hours.
 
         // Refine start boundary (find earliest acceptable time)
         // If the range starts at forecast start, we can't look earlier

@@ -1362,15 +1362,18 @@ export function checkWeatherAlerts(
     const alerts: WeatherAlert[] = [];
 
     // Wind speed alert - only for terminal waypoints (departure/arrival)
-    // Enroute wind at altitude affects ground speed, not safety
-    if (isTerminal && weather.windSpeed >= thresholds.windSpeed) {
-        alerts.push({
-            type: 'wind',
-            severity: weather.windSpeed >= thresholds.windSpeed * 1.5 ? 'warning' : 'caution',
-            message: `Wind ${Math.round(weather.windSpeed)} kt`,
-            value: weather.windSpeed,
-            threshold: thresholds.windSpeed,
-        });
+    // Use surface wind for terminals, not altitude wind
+    if (isTerminal) {
+        const terminalWindSpeed = weather.surfaceWindSpeed ?? weather.windSpeed;
+        if (terminalWindSpeed >= thresholds.windSpeed) {
+            alerts.push({
+                type: 'wind',
+                severity: terminalWindSpeed >= thresholds.windSpeed * 1.5 ? 'warning' : 'caution',
+                message: `Wind ${Math.round(terminalWindSpeed)} kt`,
+                value: terminalWindSpeed,
+                threshold: thresholds.windSpeed,
+            });
+        }
     }
 
     // Gust alert - only for terminal waypoints (departure/arrival)
