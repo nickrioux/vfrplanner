@@ -633,14 +633,14 @@
 
     <!-- Resize handles for floating mode -->
     {#if settings.windowMode === 'floating' && !floatingWindow.minimized}
-        <div class="resize-handle resize-n" on:mousedown={(e) => startResize(e, 'n')}></div>
-        <div class="resize-handle resize-s" on:mousedown={(e) => startResize(e, 's')}></div>
-        <div class="resize-handle resize-e" on:mousedown={(e) => startResize(e, 'e')}></div>
-        <div class="resize-handle resize-w" on:mousedown={(e) => startResize(e, 'w')}></div>
-        <div class="resize-handle resize-ne" on:mousedown={(e) => startResize(e, 'ne')}></div>
-        <div class="resize-handle resize-nw" on:mousedown={(e) => startResize(e, 'nw')}></div>
-        <div class="resize-handle resize-se" on:mousedown={(e) => startResize(e, 'se')}></div>
-        <div class="resize-handle resize-sw" on:mousedown={(e) => startResize(e, 'sw')}></div>
+        <div class="resize-handle resize-n" on:mousedown={(e) => startResize(e, 'n')} on:touchstart={(e) => startResize(e, 'n')}></div>
+        <div class="resize-handle resize-s" on:mousedown={(e) => startResize(e, 's')} on:touchstart={(e) => startResize(e, 's')}></div>
+        <div class="resize-handle resize-e" on:mousedown={(e) => startResize(e, 'e')} on:touchstart={(e) => startResize(e, 'e')}></div>
+        <div class="resize-handle resize-w" on:mousedown={(e) => startResize(e, 'w')} on:touchstart={(e) => startResize(e, 'w')}></div>
+        <div class="resize-handle resize-ne" on:mousedown={(e) => startResize(e, 'ne')} on:touchstart={(e) => startResize(e, 'ne')}></div>
+        <div class="resize-handle resize-nw" on:mousedown={(e) => startResize(e, 'nw')} on:touchstart={(e) => startResize(e, 'nw')}></div>
+        <div class="resize-handle resize-se" on:mousedown={(e) => startResize(e, 'se')} on:touchstart={(e) => startResize(e, 'se')}></div>
+        <div class="resize-handle resize-sw" on:mousedown={(e) => startResize(e, 'sw')} on:touchstart={(e) => startResize(e, 'sw')}></div>
     {/if}
 
     <!-- Conditions Modal -->
@@ -1810,26 +1810,34 @@
         }
     }
 
-    function startResize(e: MouseEvent, direction: string) {
+    function startResize(e: MouseEvent | TouchEvent, direction: string) {
         if (settings.windowMode !== 'floating') return;
         isResizing = true;
         resizeDirection = direction;
-        dragStartX = e.clientX;
-        dragStartY = e.clientY;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        dragStartX = clientX;
+        dragStartY = clientY;
         windowStartX = floatingWindow.x;
         windowStartY = floatingWindow.y;
         windowStartWidth = floatingWindow.width;
         windowStartHeight = floatingWindow.height;
         document.addEventListener('mousemove', handleResize);
         document.addEventListener('mouseup', stopResize);
+        document.addEventListener('touchmove', handleResize, { passive: false });
+        document.addEventListener('touchend', stopResize);
+        document.addEventListener('touchcancel', stopResize);
         e.preventDefault();
         e.stopPropagation();
     }
 
-    function handleResize(e: MouseEvent) {
+    function handleResize(e: MouseEvent | TouchEvent) {
         if (!isResizing) return;
-        const deltaX = e.clientX - dragStartX;
-        const deltaY = e.clientY - dragStartY;
+        if ('touches' in e && e.touches.length === 0) return;
+        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+        const deltaX = clientX - dragStartX;
+        const deltaY = clientY - dragStartY;
 
         const minWidth = 320;
         const minHeight = 400;
@@ -1858,6 +1866,11 @@
                 floatingWindow.y = newY;
             }
         }
+
+        // Prevent scrolling while resizing on touch devices
+        if ('touches' in e) {
+            e.preventDefault();
+        }
     }
 
     function stopResize() {
@@ -1866,6 +1879,9 @@
             resizeDirection = '';
             document.removeEventListener('mousemove', handleResize);
             document.removeEventListener('mouseup', stopResize);
+            document.removeEventListener('touchmove', handleResize);
+            document.removeEventListener('touchend', stopResize);
+            document.removeEventListener('touchcancel', stopResize);
             settings.floatingWindow = { ...floatingWindow };
             saveSession();
         }
