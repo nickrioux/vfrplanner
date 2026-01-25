@@ -3064,41 +3064,130 @@
         }
     }
 
-    /* Resize handles */
+    /* Resize handles - large touch targets with subtle visual indicators */
     .resize-handle {
         position: absolute;
         z-index: 10;
+        /* Touch target is the full element, visual indicator via ::after */
+
+        &::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0);
+            transition: background 0.15s ease;
+        }
+
+        &:hover::after,
+        &:active::after {
+            background: rgba(255, 255, 255, 0.3);
+        }
     }
 
+    /* Edge handles - 20px touch area */
     .resize-n, .resize-s {
-        left: 8px;
-        right: 8px;
-        height: 6px;
+        left: 30px; /* Avoid corners */
+        right: 30px;
+        height: 20px;
         cursor: ns-resize;
+
+        &::after {
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 4px;
+            border-radius: 2px;
+        }
     }
 
-    .resize-n { top: 0; }
-    .resize-s { bottom: 0; }
+    .resize-n {
+        top: -10px; /* Center touch target on edge */
+        &::after {
+            top: 8px;
+        }
+    }
+    .resize-s {
+        bottom: -10px;
+        &::after {
+            bottom: 8px;
+        }
+    }
 
     .resize-e, .resize-w {
-        top: 8px;
-        bottom: 8px;
-        width: 6px;
+        top: 30px; /* Avoid corners */
+        bottom: 30px;
+        width: 20px;
         cursor: ew-resize;
+
+        &::after {
+            top: 50%;
+            transform: translateY(-50%);
+            width: 4px;
+            height: 40px;
+            border-radius: 2px;
+        }
     }
 
-    .resize-e { right: 0; }
-    .resize-w { left: 0; }
+    .resize-e {
+        right: -10px;
+        &::after {
+            right: 8px;
+        }
+    }
+    .resize-w {
+        left: -10px;
+        &::after {
+            left: 8px;
+        }
+    }
 
+    /* Corner handles - 30x30px touch area */
     .resize-ne, .resize-nw, .resize-se, .resize-sw {
-        width: 12px;
-        height: 12px;
+        width: 30px;
+        height: 30px;
+
+        &::after {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+        }
     }
 
-    .resize-ne { top: 0; right: 0; cursor: nesw-resize; }
-    .resize-nw { top: 0; left: 0; cursor: nwse-resize; }
-    .resize-se { bottom: 0; right: 0; cursor: nwse-resize; }
-    .resize-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+    .resize-ne {
+        top: -10px;
+        right: -10px;
+        cursor: nesw-resize;
+        &::after {
+            top: 8px;
+            right: 8px;
+        }
+    }
+    .resize-nw {
+        top: -10px;
+        left: -10px;
+        cursor: nwse-resize;
+        &::after {
+            top: 8px;
+            left: 8px;
+        }
+    }
+    .resize-se {
+        bottom: -10px;
+        right: -10px;
+        cursor: nwse-resize;
+        &::after {
+            bottom: 8px;
+            right: 8px;
+        }
+    }
+    .resize-sw {
+        bottom: -10px;
+        left: -10px;
+        cursor: nesw-resize;
+        &::after {
+            bottom: 8px;
+            left: 8px;
+        }
+    }
 
     /* Setting toggle buttons */
     .setting-toggle {
