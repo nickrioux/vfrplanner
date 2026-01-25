@@ -184,7 +184,11 @@ export function evaluateSegmentCondition(
     const reasons: string[] = [];
 
     // Check for missing critical data
-    if (point.windSpeed === undefined || point.windSpeed === 0) {
+    // For terminal waypoints, surface wind is acceptable if altitude wind is missing
+    const hasAltitudeWind = point.windSpeed !== undefined && point.windSpeed !== 0;
+    const hasSurfaceWind = isTerminal && wx?.surfaceWindSpeed !== undefined && wx.surfaceWindSpeed !== 0;
+
+    if (!hasAltitudeWind && !hasSurfaceWind) {
         return { condition: 'unknown', reasons: ['Missing wind data'] };
     }
 
@@ -220,8 +224,11 @@ export function evaluateSegmentCondition(
     let bestRunway: BestRunwayResult | undefined;
 
     // Collect base criteria for evaluation
+    // For terminal waypoints, use surface wind as fallback if altitude wind is missing
+    const effectiveWindSpeed = point.windSpeed ?? (isTerminal ? wx?.surfaceWindSpeed : undefined) ?? 0;
+
     const criteria: ConditionCriteria = {
-        windSpeed: point.windSpeed,
+        windSpeed: effectiveWindSpeed,
         gustSpeed,
         cloudBaseAGL: cloudBaseAGL ?? 999999, // Use very high value for clear sky
         visibility,
