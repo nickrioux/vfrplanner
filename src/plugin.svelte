@@ -3302,29 +3302,53 @@
 
     .btn-browse {
         padding: 6px 16px;
+        min-height: 44px;
         background: #3498db;
         border: none;
         border-radius: 4px;
         color: white;
         cursor: pointer;
         font-size: 13px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: #2980b9;
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
     }
 
     .btn-new {
         padding: 6px 16px;
+        min-height: 44px;
         background: #27ae60;
         border: none;
         border-radius: 4px;
         color: white;
         cursor: pointer;
         font-size: 13px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: #219a52;
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(39, 174, 96, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3363,15 +3387,27 @@
 
     .btn-clear {
         padding: 4px 8px;
+        min-height: 44px;
         background: rgba(255, 255, 255, 0.1);
         border: none;
         border-radius: 4px;
         color: rgba(255, 255, 255, 0.7);
         cursor: pointer;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: rgba(231, 76, 60, 0.3);
             color: #e74c3c;
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(231, 76, 60, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3475,6 +3511,7 @@
 
     .btn-sync {
         padding: 4px 8px;
+        min-height: 44px;
         background: rgba(255, 255, 255, 0.1);
         border: none;
         border-radius: 4px;
@@ -3482,10 +3519,21 @@
         cursor: pointer;
         font-size: 10px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: rgba(255, 255, 255, 0.15);
             color: rgba(255, 255, 255, 0.8);
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(255, 255, 255, 0.3);
+            outline-offset: 2px;
         }
 
         &.active {
@@ -3526,6 +3574,7 @@
     .btn-find-windows {
         flex: 1;
         padding: 6px 10px;
+        min-height: 44px;
         background: rgba(52, 152, 219, 0.3);
         border: 1px solid rgba(52, 152, 219, 0.5);
         border-radius: 4px;
@@ -3533,9 +3582,20 @@
         cursor: pointer;
         font-size: 11px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover:not(:disabled) {
             background: rgba(52, 152, 219, 0.4);
+        }
+
+        &:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
 
         &:disabled {
@@ -3645,6 +3705,7 @@
 
     .btn-use-window {
         padding: 4px 12px;
+        min-height: 44px;
         background: rgba(52, 152, 219, 0.3);
         border: 1px solid rgba(52, 152, 219, 0.5);
         border-radius: 4px;
@@ -3652,9 +3713,20 @@
         cursor: pointer;
         font-size: 11px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: rgba(52, 152, 219, 0.5);
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(52, 152, 219, 0.5);
+            outline-offset: 2px;
         }
     }
 
@@ -3667,6 +3739,7 @@
     .btn-action {
         flex: 1;
         padding: 8px 12px;
+        min-height: 44px;
         background: rgba(255, 255, 255, 0.1);
         border: none;
         border-radius: 4px;
@@ -3674,9 +3747,20 @@
         cursor: pointer;
         font-size: 12px;
         transition: all 0.15s ease;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
 
         &:hover {
             background: rgba(255, 255, 255, 0.15);
+        }
+
+        &:active:not(:disabled) {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(255, 255, 255, 0.3);
+            outline-offset: 2px;
         }
 
         &.active {
@@ -4208,6 +4292,8 @@
 
     .btn-delete {
         padding: 4px 6px;
+        min-height: 44px;
+        min-width: 44px;
         background: transparent;
         border: none;
         color: rgba(255, 255, 255, 0.3);
@@ -4215,9 +4301,23 @@
         opacity: 0;
         transition: all 0.15s ease;
         font-size: 12px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        display: flex;
+        align-items: center;
+        justify-content: center;
 
         &:hover {
             color: #e74c3c;
+        }
+
+        &:active {
+            transform: scale(0.98);
+        }
+
+        &:focus {
+            outline: 2px solid rgba(231, 76, 60, 0.5);
+            outline-offset: 2px;
         }
     }
 
