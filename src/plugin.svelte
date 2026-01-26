@@ -138,57 +138,71 @@
         <!-- Action Buttons -->
         {#if flightPlan}
             <div class="action-buttons">
-                <button
-                    class="btn-action btn-weather"
-                    class:has-alerts={hasAnyAlerts()}
-                    on:click={handleReadWeather}
-                    disabled={isLoadingWeather}
-                    title="Fetch weather for all waypoints"
-                >
-                    {#if isLoadingWeather}
-                        ⏳ Loading...
-                    {:else}
-                        🌤️ Read Wx
-                    {/if}
-                </button>
-                <button class="btn-action" on:click={handleExportGPX} title="Export as GPX">
-                    📥 GPX
-                </button>
-                <button class="btn-action" on:click={handleExportFPL} title="Export as FPL (ForeFlight)">
-                    📥 FPL
-                </button>
-                <button
-                    class="btn-action"
-                    on:click={handleSendToDistancePlanning}
-                    title="Open route in Windy Distance & Planning (new window)"
-                >
-                    🗺️ Send to D&P
-                </button>
-                <button
-                    class="btn-action"
-                    on:click={handleReverseRoute}
-                    title="Reverse the route order"
-                >
-                    🔄 Reverse
-                </button>
-                <button
-                    class="btn-action"
-                    class:btn-edit-active={isEditMode}
-                    on:click={toggleEditMode}
-                    title={isEditMode ? 'Exit edit mode (Esc)' : 'Edit: add/move waypoints'}
-                >
-                    {isEditMode ? '✏️ Done' : '✏️ Edit'}
-                </button>
+                <div class="action-row">
+                    <button
+                        class="btn-action btn-weather"
+                        class:has-alerts={hasAnyAlerts()}
+                        on:click={handleReadWeather}
+                        disabled={isLoadingWeather}
+                        title="Fetch weather for all waypoints"
+                    >
+                        {#if isLoadingWeather}
+                            ⏳ Loading...
+                        {:else}
+                            🌤️ Read Wx
+                        {/if}
+                    </button>
+                    <button
+                        class="btn-action"
+                        on:click={handleReverseRoute}
+                        title="Reverse the route order"
+                    >
+                        🔄 Reverse
+                    </button>
+                    <button
+                        class="btn-action"
+                        class:btn-edit-active={isEditMode}
+                        on:click={toggleEditMode}
+                        title={isEditMode ? 'Exit edit mode (Esc)' : 'Edit: add/move waypoints'}
+                    >
+                        {isEditMode ? '✏️ Done' : '✏️ Edit'}
+                    </button>
+                </div>
+                <div class="action-row action-row-center">
+                    <div class="export-dropdown">
+                        <button
+                            class="btn-action"
+                            on:click|stopPropagation={() => showExportMenu = !showExportMenu}
+                            title="Export flight plan"
+                        >
+                            📥 Export {showExportMenu ? '▴' : '▾'}
+                        </button>
+                        {#if showExportMenu}
+                            <div class="export-backdrop" on:click={() => showExportMenu = false}></div>
+                            <div class="export-menu">
+                                <button on:click={() => { handleExportGPX(); showExportMenu = false; }}>
+                                    📄 GPX file
+                                </button>
+                                <button on:click={() => { handleExportFPL(); showExportMenu = false; }}>
+                                    📄 FPL file (ForeFlight)
+                                </button>
+                                <button on:click={() => { handleSendToDistancePlanning(); showExportMenu = false; }}>
+                                    🗺️ Windy Distance & Planning
+                                </button>
+                            </div>
+                        {/if}
+                    </div>
+                </div>
             </div>
         {/if}
 
-        <!-- AirportDB Search Section (always visible in Route tab) -->
+        <!-- Airport Search Section (always visible in Route tab) -->
         <div class="search-section">
             <button
                 class="btn-search-toggle"
                 class:active={showSearchPanel}
                 on:click={toggleSearchPanel}
-                title="Search airports by ICAO code from AirportDB"
+                title="Search airports by ICAO code"
             >
                 🔍 {showSearchPanel ? 'Hide Search' : 'Search Airports'}
             </button>
@@ -239,9 +253,9 @@
                             {/each}
                         </div>
                     {/if}
-                    {#if !settings.airportdbApiKey}
-                        <div class="search-hint">
-                            Enter your AirportDB API key in Settings to enable search
+                    {#if airportProvider.isUsingFallback()}
+                        <div class="search-hint fallback-indicator" title={airportProvider.getCoverageDescription() || ''}>
+                            Using offline airport data ({airportProvider.getCoverageDescription()})
                         </div>
                     {/if}
                 </div>
@@ -622,7 +636,7 @@
                 <h4>Data Sources</h4>
                 <ul>
                     <li>Weather data: <a href="https://windy.com" target="_blank" rel="noopener">Windy.com</a></li>
-                    <li>Airport data: <a href="https://airportdb.io" target="_blank" rel="noopener">AirportDB.io</a></li>
+                    <li>Airport data: <a href="https://ourairports.com" target="_blank" rel="noopener">OurAirports</a> (offline) / <a href="https://airportdb.io" target="_blank" rel="noopener">AirportDB.io</a> (API)</li>
                     <li>Elevation data: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a></li>
                 </ul>
             </div>
@@ -692,6 +706,11 @@
         type AirportDBResult,
         type AirportDBNavaid,
     } from './services/airportdbService';
+    import {
+        createAirportProvider,
+        type IAirportProvider,
+        type AirportSearchResult,
+    } from './services/airportProvider';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo, FloatingWindowState } from './types';
     import { DEFAULT_SETTINGS, DEFAULT_FLOATING_WINDOW } from './types';
     import { getThresholdsForPreset, type VfrConditionThresholds, type ConditionPreset } from './types/conditionThresholds';
@@ -728,6 +747,7 @@
     let isSearching = false;
     let searchError: string | null = null;
     let showSearchPanel = false;
+    let showExportMenu = false;
 
     // Edit mode state (transient, not persisted)
     // When true: markers are draggable, map clicks add waypoints, segment clicks insert waypoints
@@ -786,8 +806,14 @@
     // Settings
     let settings: PluginSettings = { ...DEFAULT_SETTINGS };
 
+    // Airport provider - automatically uses fallback when no API key
+    let airportProvider: IAirportProvider = createAirportProvider(settings.airportdbApiKey);
+
     // Sync logger state with settings
     $: logger.setEnabled(settings.enableLogging);
+
+    // Update airport provider when API key changes
+    $: airportProvider = createAirportProvider(settings.airportdbApiKey);
 
     // Floating window state
     let floatingWindow: FloatingWindowState = { ...DEFAULT_FLOATING_WINDOW };
@@ -937,11 +963,11 @@
                 }
             }
 
-            // Fetch runway data for departure/arrival airports (if API key available)
+            // Fetch runway data for departure/arrival airports (uses provider - API or fallback)
             if (settings.enableLogging) {
-                console.log(`[VFR Runway Debug] API key present: ${!!settings.airportdbApiKey}, waypoints: ${plan.waypoints.length}`);
+                console.log(`[VFR Runway Debug] Provider: ${airportProvider.getSourceName()}, waypoints: ${plan.waypoints.length}`);
             }
-            if (settings.airportdbApiKey && plan.waypoints.length >= 1) {
+            if (plan.waypoints.length >= 1) {
                 // Fetch departure runway data
                 const departureWp = plan.waypoints[0];
                 if (settings.enableLogging) {
@@ -952,40 +978,15 @@
                         if (settings.enableLogging) {
                             console.log(`[VFR Runway Debug] Fetching runway data for ${departureWp.name}...`);
                         }
-                        const airportData = await getAirportByICAO(departureWp.name, settings.airportdbApiKey);
+                        const airportData = await airportProvider.searchByIcao(departureWp.name);
                         if (settings.enableLogging) {
-                            console.log(`[VFR Runway Debug] AirportDB response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                            console.log(`[VFR Runway Debug] Provider response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
                         }
                         if (airportData?.runways && airportData.runways.length > 0) {
+                            // Provider already returns runways in the correct format
+                            plan.waypoints[0] = { ...plan.waypoints[0], runways: airportData.runways };
                             if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] Raw runways for ${departureWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
-                            }
-                            // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
-                            const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
-                            if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
-                            }
-                            const runways = filteredRunways.map(rwy => {
-                                if (settings.enableLogging) {
-                                    console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
-                                }
-                                return {
-                                    id: rwy.id,
-                                    lengthFt: rwy.length_ft,
-                                    widthFt: rwy.width_ft,
-                                    surface: rwy.surface,
-                                    lighted: rwy.lighted,
-                                    closed: rwy.closed,
-                                    lowEnd: { ident: rwy.le_ident, headingTrue: rwy.le_heading_degT },
-                                    highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
-                                };
-                            });
-                            if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] Final runways array:`, runways);
-                            }
-                            plan.waypoints[0] = { ...plan.waypoints[0], runways };
-                            if (settings.enableLogging) {
-                                console.log(`[VFR Planner] Loaded ${runways.length} runways for departure ${departureWp.name}`);
+                                console.log(`[VFR Planner] Loaded ${airportData.runways.length} runways for departure ${departureWp.name}`);
                             }
                         }
                     } catch (err) {
@@ -1006,40 +1007,15 @@
                             if (settings.enableLogging) {
                                 console.log(`[VFR Runway Debug] Fetching runway data for ${arrivalWp.name}...`);
                             }
-                            const airportData = await getAirportByICAO(arrivalWp.name, settings.airportdbApiKey);
+                            const airportData = await airportProvider.searchByIcao(arrivalWp.name);
                             if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] AirportDB response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways` : 'NULL');
+                                console.log(`[VFR Runway Debug] Provider response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
                             }
                             if (airportData?.runways && airportData.runways.length > 0) {
+                                // Provider already returns runways in the correct format
+                                plan.waypoints[plan.waypoints.length - 1] = { ...plan.waypoints[plan.waypoints.length - 1], runways: airportData.runways };
                                 if (settings.enableLogging) {
-                                    console.log(`[VFR Runway Debug] Raw runways for ${arrivalWp.name}:`, airportData.runways.map(r => ({ id: r.le_ident + '/' + r.he_ident, closed: r.closed, closedType: typeof r.closed })));
-                                }
-                                // closed: 0 or false means OPEN, closed: 1 or true means CLOSED
-                                const filteredRunways = airportData.runways.filter(rwy => !rwy.closed || rwy.closed === 0 || rwy.closed === '0');
-                                if (settings.enableLogging) {
-                                    console.log(`[VFR Runway Debug] After filter: ${filteredRunways.length} runways`);
-                                }
-                                const runways = filteredRunways.map(rwy => {
-                                    if (settings.enableLogging) {
-                                        console.log(`[VFR Runway Debug] Mapping runway: ${rwy.le_ident}/${rwy.he_ident}, headings: ${rwy.le_heading_degT}/${rwy.he_heading_degT}`);
-                                    }
-                                    return {
-                                        id: rwy.id,
-                                        lengthFt: rwy.length_ft,
-                                        widthFt: rwy.width_ft,
-                                        surface: rwy.surface,
-                                        lighted: rwy.lighted,
-                                        closed: rwy.closed,
-                                        lowEnd: { ident: rwy.le_ident, headingTrue: rwy.le_heading_degT },
-                                        highEnd: { ident: rwy.he_ident, headingTrue: rwy.he_heading_degT },
-                                    };
-                                });
-                                if (settings.enableLogging) {
-                                    console.log(`[VFR Runway Debug] Final runways array:`, runways);
-                                }
-                                plan.waypoints[plan.waypoints.length - 1] = { ...plan.waypoints[plan.waypoints.length - 1], runways };
-                                if (settings.enableLogging) {
-                                    console.log(`[VFR Planner] Loaded ${runways.length} runways for arrival ${arrivalWp.name}`);
+                                    console.log(`[VFR Planner] Loaded ${airportData.runways.length} runways for arrival ${arrivalWp.name}`);
                                 }
                             }
                         } catch (err) {
@@ -1437,15 +1413,58 @@
         updateMapLayers();
     }
 
-    // AirportDB Search Functions
+    // Convert AirportSearchResult to AirportDBResult format for compatibility
+    function searchResultToAirportDB(result: AirportSearchResult): AirportDBResult {
+        return {
+            icao_code: result.icao,
+            iata_code: result.iata || '',
+            name: result.name,
+            type: result.type,
+            latitude_deg: result.lat,
+            longitude_deg: result.lon,
+            elevation_ft: result.elevation,
+            continent: '',
+            iso_country: result.region.split('-')[0],
+            iso_region: result.region,
+            municipality: result.municipality || '',
+            scheduled_service: '',
+            gps_code: result.icao,
+            local_code: '',
+            home_link: '',
+            wikipedia_link: '',
+            keywords: '',
+            runways: result.runways.map(rwy => ({
+                id: rwy.id,
+                airport_ref: '',
+                airport_ident: result.icao,
+                length_ft: rwy.lengthFt,
+                width_ft: rwy.widthFt,
+                surface: rwy.surface,
+                lighted: rwy.lighted,
+                closed: rwy.closed,
+                le_ident: rwy.lowEnd.ident,
+                le_latitude_deg: 0,
+                le_longitude_deg: 0,
+                le_elevation_ft: 0,
+                le_heading_degT: rwy.lowEnd.headingTrue,
+                he_ident: rwy.highEnd.ident,
+                he_latitude_deg: 0,
+                he_longitude_deg: 0,
+                he_elevation_ft: 0,
+                he_heading_degT: rwy.highEnd.headingTrue,
+            })),
+            freqs: [],
+            country: { id: '', code: result.region.split('-')[0], name: '', continent: '', wikipedia_link: '', keywords: '' },
+            region: { id: '', code: result.region, local_code: '', name: '', continent: '', iso_country: result.region.split('-')[0], wikipedia_link: '', keywords: '' },
+            navaids: [],
+            station: { icao_code: '', distance: 0 },
+        };
+    }
+
+    // Airport Search Functions
     async function handleSearch() {
         if (!searchQuery.trim()) {
             searchResults = { airports: [], navaids: [] };
-            return;
-        }
-
-        if (!settings.airportdbApiKey) {
-            searchError = 'Please enter your AirportDB API key in Settings';
             return;
         }
 
@@ -1453,17 +1472,33 @@
         searchError = null;
 
         try {
-            // AirportDB only supports exact ICAO lookup
-            const airport = await searchAirport(searchQuery.trim(), settings.airportdbApiKey);
-            if (airport) {
-                // Airport found - also include its navaids
+            // Use provider (API or fallback based on API key availability)
+            const result = await airportProvider.searchByIcao(searchQuery.trim());
+            if (result) {
+                // Convert to AirportDBResult format for compatibility
+                const airport = searchResultToAirportDB(result);
+
+                // For API results, fetch full data to get navaids
+                let navaids: AirportDBNavaid[] = [];
+                if (!airportProvider.isUsingFallback() && settings.airportdbApiKey) {
+                    const fullData = await getAirportByICAO(result.icao, settings.airportdbApiKey);
+                    if (fullData?.navaids) {
+                        navaids = fullData.navaids;
+                    }
+                }
+
                 searchResults = {
                     airports: [airport],
-                    navaids: airport.navaids || []
+                    navaids
                 };
             } else {
                 searchResults = { airports: [], navaids: [] };
-                searchError = 'No airport found. Try an exact ICAO code (e.g., CYQB, KJFK)';
+                if (airportProvider.isUsingFallback()) {
+                    const coverage = airportProvider.getCoverageDescription();
+                    searchError = `Airport not found in offline database. Coverage: ${coverage}`;
+                } else {
+                    searchError = 'No airport found. Try an exact ICAO code (e.g., CYQB, KJFK)';
+                }
             }
         } catch (err) {
             searchError = err instanceof Error ? err.message : 'Search failed';
@@ -3890,14 +3925,24 @@
 
     .action-buttons {
         display: flex;
-        gap: 8px;
+        flex-direction: column;
+        gap: 6px;
         padding: 0 10px 10px;
+    }
+
+    .action-row {
+        display: flex;
+        gap: 6px;
+
+        &.action-row-center {
+            justify-content: center;
+        }
     }
 
     .btn-action {
         flex: 1;
-        padding: 8px 12px;
-        min-height: 44px;
+        padding: 6px 8px;
+        min-height: 36px;
         background: rgba(255, 255, 255, 0.1);
         border: none;
         border-radius: 4px;
@@ -3943,7 +3988,62 @@
         }
     }
 
-    /* AirportDB Search Section */
+    /* Export Dropdown */
+    .export-dropdown {
+        position: relative;
+        width: calc(33.33% - 4px); /* Same width as buttons in first row */
+
+        > .btn-action {
+            width: 100%;
+            flex: none;
+        }
+    }
+
+    .export-backdrop {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 99;
+    }
+
+    .export-menu {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        margin-top: 4px;
+        background: #2a2a2a;
+        border: 1px solid #444;
+        border-radius: 4px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+        z-index: 100;
+        overflow: hidden;
+
+        button {
+            display: block;
+            width: 100%;
+            padding: 10px 12px;
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 13px;
+            text-align: left;
+            cursor: pointer;
+            transition: background 0.15s ease;
+
+            &:hover {
+                background: rgba(255, 255, 255, 0.1);
+            }
+
+            &:not(:last-child) {
+                border-bottom: 1px solid #444;
+            }
+        }
+    }
+
+    /* Airport Search Section */
     .search-section {
         margin: 10px;
     }
@@ -4766,13 +4866,11 @@
             padding: 12px 4px;
         }
 
-        /* Stack action buttons vertically on narrow screens */
+        /* Larger touch targets on mobile */
         .action-buttons {
-            flex-wrap: wrap;
-
             .btn-action {
-                flex: 1 1 45%;
-                min-width: 120px;
+                min-height: 44px;
+                padding: 8px 10px;
             }
         }
     }
