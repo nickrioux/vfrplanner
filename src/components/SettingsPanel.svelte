@@ -178,16 +178,17 @@
     </div>
 
     <div class="setting-group">
-        <label class="setting-label">AirportDB API Key</label>
+        <label class="setting-label">AirportDB API Key (Optional)</label>
         <input
             type="password"
             class="setting-input api-key-input"
             bind:value={settings.airportdbApiKey}
             on:change={handleChange}
-            placeholder="Enter your API key"
+            placeholder="Optional - offline data available"
         />
         <div class="setting-description">
-            Required for airport search by ICAO code. Get a free key at
+            <strong>Without API key:</strong> Offline airport data for Canada and NE US (from <a href="https://ourairports.com" target="_blank" rel="noopener">OurAirports</a>).<br/>
+            <strong>With API key:</strong> Global coverage + navaids. Get a free key at
             <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
         </div>
     </div>
