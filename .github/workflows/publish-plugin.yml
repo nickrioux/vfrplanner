@@ -9,11 +9,16 @@ jobs:
         env:
             WINDY_API_KEY: '${{ secrets.WINDY_API_KEY }}'
         steps:
-            - uses: actions/checkout@v2
-            - name: Build
-              run: |
-                  npm install
-                  npm run build
+            - uses: actions/checkout@v4
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: '20'
+                  cache: 'npm'
+            - name: Install dependencies
+              run: npm ci
+            - name: Build (includes OurAirports data generation)
+              run: npm run build
             - name: Publish Plugin
               run: |
                   if [ -z "$WINDY_API_KEY" ]; then

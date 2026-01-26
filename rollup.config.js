@@ -2,6 +2,7 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
+import json from '@rollup/plugin-json';
 
 import serve from 'rollup-plugin-serve';
 import rollupSvelte from 'rollup-plugin-svelte';
@@ -78,6 +79,7 @@ export default {
         clearScreen: false,
     },
     plugins: [
+        json(), // Enable JSON imports for airport fallback data
         rollupSvelte({
             emitCss: false,
             preprocess: {
