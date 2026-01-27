@@ -575,12 +575,12 @@
                     <button
                         class="toggle-btn"
                         class:active={settings.windowMode === 'panel'}
-                        on:click={() => { settings.windowMode = 'panel'; saveSession(); }}
+                        on:click={() => { settings.windowMode = 'panel'; saveSession(); setTimeout(() => map.invalidateSize(), 100); }}
                     >Panel</button>
                     <button
                         class="toggle-btn"
                         class:active={settings.windowMode === 'floating'}
-                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); }}
+                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); setTimeout(() => map.invalidateSize(), 100); }}
                     >Floating</button>
                 </div>
                 <div class="setting-description">
@@ -1944,12 +1944,17 @@
     }
 
     function toggleWindowMode() {
-        settings.windowMode = settings.windowMode === 'panel' ? 'floating' : 'panel';
+        const wasPanel = settings.windowMode === 'panel';
+        settings.windowMode = wasPanel ? 'floating' : 'panel';
         if (settings.windowMode === 'floating') {
             // Restore floating window position from settings
             floatingWindow = { ...settings.floatingWindow };
         }
         saveSession();
+        // Trigger map resize after switching modes
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 100);
     }
 
     function handleExportGPX() {
