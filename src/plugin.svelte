@@ -1955,18 +1955,20 @@
     }
 
     function updateRhpaneVisibility() {
-        // Find the rhpane container and hide/show it based on window mode
+        // Find the plugin-rhpane container and hide/show it based on window mode
         setTimeout(() => {
-            const rhpane = document.getElementById('rhpane');
+            const rhpane = document.querySelector('.plugin-rhpane');
             if (rhpane) {
                 if (settings.windowMode === 'floating') {
-                    rhpane.style.width = '0';
-                    rhpane.style.minWidth = '0';
-                    rhpane.style.overflow = 'visible';
+                    (rhpane as HTMLElement).style.width = '0';
+                    (rhpane as HTMLElement).style.minWidth = '0';
+                    (rhpane as HTMLElement).style.padding = '0';
+                    (rhpane as HTMLElement).style.overflow = 'visible';
                 } else {
-                    rhpane.style.width = '';
-                    rhpane.style.minWidth = '';
-                    rhpane.style.overflow = '';
+                    (rhpane as HTMLElement).style.width = '';
+                    (rhpane as HTMLElement).style.minWidth = '';
+                    (rhpane as HTMLElement).style.padding = '';
+                    (rhpane as HTMLElement).style.overflow = '';
                 }
             }
             map.invalidateSize();
@@ -3126,10 +3128,11 @@
         // Clean up window resize listener
         window.removeEventListener('resize', handleWindowResize);
         // Restore rhpane if it was hidden
-        const rhpane = document.getElementById('rhpane');
+        const rhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
         if (rhpane) {
             rhpane.style.width = '';
             rhpane.style.minWidth = '';
+            rhpane.style.padding = '';
             rhpane.style.overflow = '';
         }
     });
