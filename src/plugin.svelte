@@ -616,8 +616,6 @@
 </section>
 
 <script lang="ts">
-    declare const W: { map: { map: { invalidateSize: () => void } } };
-
     import bcast from '@windy/broadcast';
     import { map } from '@windy/map';
     import { singleclick } from '@windy/singleclick';
@@ -661,8 +659,8 @@
         type IAirportProvider,
         type AirportSearchResult,
     } from './services/airportProvider';
-    import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo, FloatingWindowState } from './types';
-    import { DEFAULT_SETTINGS, DEFAULT_FLOATING_WINDOW } from './types';
+    import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
+    import { DEFAULT_SETTINGS } from './types';
     import { getThresholdsForPreset, type VfrConditionThresholds, type ConditionPreset } from './types/conditionThresholds';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
     import SettingsPanel from './components/SettingsPanel.svelte';
@@ -764,19 +762,6 @@
 
     // Update airport provider when API key changes
     $: airportProvider = createAirportProvider(settings.airportdbApiKey);
-
-    // Floating window state
-    let floatingWindow: FloatingWindowState = { ...DEFAULT_FLOATING_WINDOW };
-    let isDragging = false;
-    let isResizing = false;
-    let resizeDirection: string = '';
-    let dragStartX = 0;
-    let dragStartY = 0;
-    let windowStartX = 0;
-    let windowStartY = 0;
-    let windowStartWidth = 0;
-    let windowStartHeight = 0;
-    let floatingWindowEl: HTMLElement | null = null;
 
     // Profile state
     let maxProfileAltitude: number = 15000;
@@ -1737,183 +1722,6 @@
 
     function handleProfileAltitudeChange(event: CustomEvent<number>) {
         maxProfileAltitude = event.detail;
-    }
-
-    // ===== Floating Window Functions =====
-
-    function startDrag(e: MouseEvent | TouchEvent) {
-        if (settings.windowMode !== 'floating') return;
-        isDragging = true;
-
-        // Get coordinates from touch or mouse event
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-        dragStartX = clientX;
-        dragStartY = clientY;
-        windowStartX = floatingWindow.x;
-        windowStartY = floatingWindow.y;
-
-        // Add both mouse and touch listeners
-        document.addEventListener('mousemove', handleDrag);
-        document.addEventListener('mouseup', stopDrag);
-        document.addEventListener('touchmove', handleDrag, { passive: false });
-        document.addEventListener('touchend', stopDrag);
-        document.addEventListener('touchcancel', stopDrag);
-        e.preventDefault();
-    }
-
-    function handleDrag(e: MouseEvent | TouchEvent) {
-        if (!isDragging) return;
-        if ('touches' in e && e.touches.length === 0) return;
-
-        // Get coordinates from touch or mouse event
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-
-        const deltaX = clientX - dragStartX;
-        const deltaY = clientY - dragStartY;
-
-        // Calculate new position with bounds checking
-        const newX = Math.max(0, Math.min(window.innerWidth - floatingWindow.width, windowStartX + deltaX));
-        const newY = Math.max(0, Math.min(window.innerHeight - 50, windowStartY + deltaY));
-
-        floatingWindow.x = newX;
-        floatingWindow.y = newY;
-
-        // Prevent scrolling while dragging on touch devices
-        if ('touches' in e) {
-            e.preventDefault();
-        }
-    }
-
-    function stopDrag() {
-        if (isDragging) {
-            isDragging = false;
-            // Remove both mouse and touch listeners
-            document.removeEventListener('mousemove', handleDrag);
-            document.removeEventListener('mouseup', stopDrag);
-            document.removeEventListener('touchmove', handleDrag);
-            document.removeEventListener('touchend', stopDrag);
-            document.removeEventListener('touchcancel', stopDrag);
-            settings.floatingWindow = { ...floatingWindow };
-            saveSession();
-        }
-    }
-
-    function startResize(e: MouseEvent | TouchEvent, direction: string) {
-        if (settings.windowMode !== 'floating') return;
-        isResizing = true;
-        resizeDirection = direction;
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        dragStartX = clientX;
-        dragStartY = clientY;
-        windowStartX = floatingWindow.x;
-        windowStartY = floatingWindow.y;
-        windowStartWidth = floatingWindow.width;
-        windowStartHeight = floatingWindow.height;
-        document.addEventListener('mousemove', handleResize);
-        document.addEventListener('mouseup', stopResize);
-        document.addEventListener('touchmove', handleResize, { passive: false });
-        document.addEventListener('touchend', stopResize);
-        document.addEventListener('touchcancel', stopResize);
-        e.preventDefault();
-        e.stopPropagation();
-    }
-
-    function handleResize(e: MouseEvent | TouchEvent) {
-        if (!isResizing) return;
-        if ('touches' in e && e.touches.length === 0) return;
-        const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-        const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-        const deltaX = clientX - dragStartX;
-        const deltaY = clientY - dragStartY;
-
-        const minWidth = 320;
-        const minHeight = 400;
-        const maxWidth = window.innerWidth - floatingWindow.x;
-        const maxHeight = window.innerHeight - floatingWindow.y;
-
-        if (resizeDirection.includes('e')) {
-            floatingWindow.width = Math.max(minWidth, Math.min(maxWidth, windowStartWidth + deltaX));
-        }
-        if (resizeDirection.includes('w')) {
-            const newWidth = Math.max(minWidth, windowStartWidth - deltaX);
-            const newX = windowStartX + (windowStartWidth - newWidth);
-            if (newX >= 0) {
-                floatingWindow.width = newWidth;
-                floatingWindow.x = newX;
-            }
-        }
-        if (resizeDirection.includes('s')) {
-            floatingWindow.height = Math.max(minHeight, Math.min(maxHeight, windowStartHeight + deltaY));
-        }
-        if (resizeDirection.includes('n')) {
-            const newHeight = Math.max(minHeight, windowStartHeight - deltaY);
-            const newY = windowStartY + (windowStartHeight - newHeight);
-            if (newY >= 0) {
-                floatingWindow.height = newHeight;
-                floatingWindow.y = newY;
-            }
-        }
-
-        // Prevent scrolling while resizing on touch devices
-        if ('touches' in e) {
-            e.preventDefault();
-        }
-    }
-
-    function stopResize() {
-        if (isResizing) {
-            isResizing = false;
-            resizeDirection = '';
-            document.removeEventListener('mousemove', handleResize);
-            document.removeEventListener('mouseup', stopResize);
-            document.removeEventListener('touchmove', handleResize);
-            document.removeEventListener('touchend', stopResize);
-            document.removeEventListener('touchcancel', stopResize);
-            settings.floatingWindow = { ...floatingWindow };
-            saveSession();
-        }
-    }
-
-    function toggleMinimize() {
-        floatingWindow.minimized = !floatingWindow.minimized;
-        settings.floatingWindow = { ...floatingWindow };
-        saveSession();
-    }
-
-    function toggleWindowMode() {
-        const wasPanel = settings.windowMode === 'panel';
-        settings.windowMode = wasPanel ? 'floating' : 'panel';
-        if (settings.windowMode === 'floating') {
-            // Restore floating window position from settings
-            floatingWindow = { ...settings.floatingWindow };
-        }
-        saveSession();
-        updateRhpaneVisibility();
-    }
-
-    function updateRhpaneVisibility() {
-        setTimeout(() => {
-            const pluginRhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
-            if (pluginRhpane) {
-                if (settings.windowMode === 'floating') {
-                    // Hide the rhpane container but keep overflow visible for the floating window
-                    pluginRhpane.style.display = 'contents';
-                } else {
-                    // Restore normal display
-                    pluginRhpane.style.display = '';
-                }
-            }
-            // Trigger map resize
-            setTimeout(() => {
-                if (typeof W !== 'undefined' && W.map && W.map.map) {
-                    W.map.map.invalidateSize();
-                }
-            }, 100);
-        }, 50);
     }
 
     function handleExportGPX() {
@@ -3053,10 +2861,6 @@
         window.addEventListener('keydown', handleKeyDown);
         // Listen for window resize to update mobile state
         window.addEventListener('resize', handleWindowResize);
-        // Apply rhpane visibility based on saved window mode
-        if (settings.windowMode === 'floating') {
-            updateRhpaneVisibility();
-        }
     });
 
     onDestroy(() => {
@@ -3077,20 +2881,7 @@
 </script>
 
 <style lang="less">
-    /* ===== Floating Window Mode Styles ===== */
-    :global(.plugin__content.floating-mode) {
-        position: fixed !important;
-        z-index: 10000 !important;
-        background: #1e1e2e !important;
-        border-radius: 8px !important;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) !important;
-        overflow: hidden !important;
-        display: flex !important;
-        flex-direction: column !important;
-        padding: 0 !important;
-    }
-
-    /* Scrollable content wrapper - works for both panel and floating mode */
+    /* Scrollable content wrapper */
     .main-content-scroll {
         display: flex;
         flex-direction: column;
@@ -3099,19 +2890,6 @@
         overflow-x: hidden;
         min-height: 0; /* Important for flex scroll */
         padding: 0 12px 12px 12px;
-    }
-
-    :global(.plugin__content.floating-mode.minimized) {
-        height: auto !important;
-    }
-
-    :global(.plugin__content.floating-mode.dragging) {
-        opacity: 0.9;
-        cursor: grabbing !important;
-    }
-
-    :global(.plugin__content.floating-mode.resizing) {
-        user-select: none;
     }
 
     /* Waypoint permanent labels on map */
@@ -3128,192 +2906,6 @@
 
     :global(.waypoint-label::before) {
         border-top-color: rgba(30, 30, 46, 0.9) !important;
-    }
-
-    .floating-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 10px 12px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        cursor: grab;
-        user-select: none;
-        flex-shrink: 0;
-
-        &:active {
-            cursor: grabbing;
-        }
-    }
-
-    .floating-title {
-        font-size: 14px;
-        font-weight: 600;
-        color: white;
-    }
-
-    .floating-controls {
-        display: flex;
-        gap: 4px;
-    }
-
-    .floating-btn {
-        min-width: 44px;
-        min-height: 44px;
-        width: 44px;
-        height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: rgba(255, 255, 255, 0.1);
-        border: none;
-        border-radius: 6px;
-        color: rgba(255, 255, 255, 0.7);
-        cursor: pointer;
-        font-size: 16px;
-        transition: all 0.15s ease;
-        touch-action: manipulation;
-        -webkit-tap-highlight-color: transparent;
-
-        &:hover,
-        &:active {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-        }
-
-        &:focus {
-            outline: 2px solid rgba(255, 255, 255, 0.5);
-            outline-offset: 2px;
-        }
-
-        &:focus:not(:focus-visible) {
-            outline: none;
-        }
-    }
-
-    /* Resize handles - large touch targets with subtle visual indicators */
-    .resize-handle {
-        position: absolute;
-        z-index: 10;
-        /* Touch target is the full element, visual indicator via ::after */
-
-        &::after {
-            content: '';
-            position: absolute;
-            background: rgba(255, 255, 255, 0);
-            transition: background 0.15s ease;
-        }
-
-        &:hover::after,
-        &:active::after {
-            background: rgba(255, 255, 255, 0.3);
-        }
-    }
-
-    /* Edge handles - 20px touch area */
-    .resize-n, .resize-s {
-        left: 30px; /* Avoid corners */
-        right: 30px;
-        height: 20px;
-        cursor: ns-resize;
-
-        &::after {
-            left: 50%;
-            transform: translateX(-50%);
-            width: 40px;
-            height: 4px;
-            border-radius: 2px;
-        }
-    }
-
-    .resize-n {
-        top: -10px; /* Center touch target on edge */
-        &::after {
-            top: 8px;
-        }
-    }
-    .resize-s {
-        bottom: -10px;
-        &::after {
-            bottom: 8px;
-        }
-    }
-
-    .resize-e, .resize-w {
-        top: 30px; /* Avoid corners */
-        bottom: 30px;
-        width: 20px;
-        cursor: ew-resize;
-
-        &::after {
-            top: 50%;
-            transform: translateY(-50%);
-            width: 4px;
-            height: 40px;
-            border-radius: 2px;
-        }
-    }
-
-    .resize-e {
-        right: -10px;
-        &::after {
-            right: 8px;
-        }
-    }
-    .resize-w {
-        left: -10px;
-        &::after {
-            left: 8px;
-        }
-    }
-
-    /* Corner handles - 30x30px touch area */
-    .resize-ne, .resize-nw, .resize-se, .resize-sw {
-        width: 30px;
-        height: 30px;
-
-        &::after {
-            width: 10px;
-            height: 10px;
-            border-radius: 2px;
-        }
-    }
-
-    .resize-ne {
-        top: -10px;
-        right: -10px;
-        cursor: nesw-resize;
-        &::after {
-            top: 8px;
-            right: 8px;
-        }
-    }
-    .resize-nw {
-        top: -10px;
-        left: -10px;
-        cursor: nwse-resize;
-        &::after {
-            top: 8px;
-            left: 8px;
-        }
-    }
-    .resize-se {
-        bottom: -10px;
-        right: -10px;
-        cursor: nwse-resize;
-        &::after {
-            bottom: 8px;
-            right: 8px;
-        }
-    }
-    .resize-sw {
-        bottom: -10px;
-        left: -10px;
-        cursor: nesw-resize;
-        &::after {
-            bottom: 8px;
-            left: 8px;
-        }
     }
 
     /* Setting toggle buttons */
@@ -4871,11 +4463,6 @@
 
     /* ===== Mobile-specific Styles ===== */
     :global(.plugin__content.mobile) {
-        /* Hide resize handles on mobile (use full pane instead) */
-        .resize-handle {
-            display: none;
-        }
-
         /* Larger touch targets for tabs */
         .tab {
             min-height: 48px;
