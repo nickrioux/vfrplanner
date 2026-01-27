@@ -612,7 +612,8 @@
             </div>
 
             <div class="about-description">
-                <p>A Windy.com plugin for VFR flight planning with weather overlay, altitude profiles, and navigation calculations.</p>
+                <p><strong>Your pre-flight weather window assistant.</strong></p>
+                <p>Designed by a pilot to automate the scan of ceilings, visibility, and winds across forecast models. Find your window, then verify your briefing.</p>
             </div>
 
             <div class="about-disclaimer">
@@ -642,10 +643,10 @@
             </div>
 
             <div class="about-support">
-                <h4>☕ Support This Project</h4>
-                <p>If you find this plugin useful, consider buying me a coffee!</p>
+                <h4>⛽ Support This Project</h4>
+                <p>If you find this plugin useful, consider buying me a gallon of 100LL!</p>
                 <a href="https://buymeacoffee.com/wingguideai" target="_blank" rel="noopener" class="coffee-link">
-                    Buy me a coffee
+                    Buy me a gallon of 100LL
                 </a>
             </div>
         </div>
