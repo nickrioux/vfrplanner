@@ -1956,23 +1956,17 @@
         updateRhpaneVisibility();
     }
 
-    let originalParent: HTMLElement | null = null;
-
     function updateRhpaneVisibility() {
         setTimeout(() => {
-            if (settings.windowMode === 'floating' && floatingWindowEl) {
-                // Store original parent and move floating window to body
-                if (!originalParent) {
-                    originalParent = floatingWindowEl.parentElement as HTMLElement;
+            const pluginRhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
+            if (pluginRhpane) {
+                if (settings.windowMode === 'floating') {
+                    // Hide the rhpane container but keep overflow visible for the floating window
+                    pluginRhpane.style.display = 'contents';
+                } else {
+                    // Restore normal display
+                    pluginRhpane.style.display = '';
                 }
-                document.body.appendChild(floatingWindowEl);
-                // Close the rhpane properly so Windy reclaims the space
-                bcast.emit('rqstClose', name);
-            } else if (settings.windowMode === 'panel' && floatingWindowEl && originalParent) {
-                // Move back to original parent and reopen plugin
-                originalParent.appendChild(floatingWindowEl);
-                bcast.emit('rqstOpen', name);
-                originalParent = null;
             }
             // Trigger map resize
             setTimeout(() => {
@@ -3135,9 +3129,10 @@
         window.removeEventListener('keydown', handleKeyDown);
         // Clean up window resize listener
         window.removeEventListener('resize', handleWindowResize);
-        // Clean up floating window if it was moved to body
-        if (floatingWindowEl && floatingWindowEl.parentElement === document.body) {
-            floatingWindowEl.remove();
+        // Restore rhpane display if it was hidden
+        const pluginRhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
+        if (pluginRhpane) {
+            pluginRhpane.style.display = '';
         }
     });
 </script>
