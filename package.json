@@ -31,7 +31,7 @@
         "aviation"
     ],
     "author": "Nicolas",
-    "license": "ISC",
+    "license": "MIT",
     "bugs": {
         "url": "https://github.com/nrioux/windy-plugin-vfr-planner/issues"
     },
