@@ -56,7 +56,7 @@
         >
             <input
                 type="file"
-                accept=".fpl,.xml"
+                accept=".fpl,.xml,.gpx"
                 on:change={handleFileSelect}
                 bind:this={fileInput}
                 style="display: none"
@@ -66,7 +66,7 @@
             {:else if !flightPlan}
                 <div class="drop-zone-content">
                     <span class="drop-icon">✈️</span>
-                    <span>Drop .fpl file or</span>
+                    <span>Drop .fpl/.gpx file or</span>
                     <div class="drop-zone-buttons">
                         <button class="btn-browse" on:click={() => fileInput?.click()}>
                             Browse...
@@ -470,6 +470,7 @@
 
     import config from './pluginConfig';
     import { readFPLFile, convertToFlightPlan, validateFPL } from './parsers/fplParser';
+    import { readGPXFile } from './parsers/gpxParser';
     import { calculateFlightPlanNavigation, formatDistance, formatBearing, formatEte, calculateGroundSpeed, formatHeadwind, calculateHeadwindComponent } from './services/navigationCalc';
     import { downloadGPX } from './exporters/gpxExporter';
     import { downloadFPL } from './exporters/fplExporter';
@@ -652,23 +653,42 @@
         isLoading = true;
 
         try {
-            const result = await readFPLFile(file);
+            let plan: FlightPlan;
 
-            if (!result.success || !result.flightPlan) {
-                error = result.error || 'Failed to parse file';
-                isLoading = false;
-                return;
+            // Detect file type by extension
+            const isGPX = file.name.toLowerCase().endsWith('.gpx');
+
+            if (isGPX) {
+                // Parse GPX file
+                const gpxResult = await readGPXFile(file);
+
+                if (!gpxResult.success || !gpxResult.flightPlan) {
+                    error = gpxResult.error || 'Failed to parse GPX file';
+                    isLoading = false;
+                    return;
+                }
+
+                plan = gpxResult.flightPlan;
+            } else {
+                // Parse FPL file
+                const fplResult = await readFPLFile(file);
+
+                if (!fplResult.success || !fplResult.flightPlan) {
+                    error = fplResult.error || 'Failed to parse file';
+                    isLoading = false;
+                    return;
+                }
+
+                const validation = validateFPL(fplResult.flightPlan);
+                if (!validation.valid) {
+                    error = validation.errors.map(e => e.message).join(', ');
+                    isLoading = false;
+                    return;
+                }
+
+                // Convert to internal format
+                plan = convertToFlightPlan(fplResult.flightPlan, file.name);
             }
-
-            const validation = validateFPL(result.flightPlan);
-            if (!validation.valid) {
-                error = validation.errors.map(e => e.message).join(', ');
-                isLoading = false;
-                return;
-            }
-
-            // Convert to internal format
-            let plan = convertToFlightPlan(result.flightPlan, file.name);
 
             // Apply settings
             plan.aircraft.airspeed = settings.defaultAirspeed;
