@@ -193,16 +193,6 @@
         </div>
     </div>
 
-    <div class="setting-group">
-        <label class="setting-checkbox">
-            <input
-                type="checkbox"
-                bind:checked={settings.enableLogging}
-                on:change={handleChange}
-            />
-            Enable debug logging
-        </label>
-    </div>
 </div>
 
 <style lang="less">
