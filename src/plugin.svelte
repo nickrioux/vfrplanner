@@ -677,6 +677,8 @@
 </section>
 
 <script lang="ts">
+    declare const W: { map: { map: { invalidateSize: () => void } } };
+
     import bcast from '@windy/broadcast';
     import { map } from '@windy/map';
     import { singleclick } from '@windy/singleclick';
@@ -1954,24 +1956,30 @@
         updateRhpaneVisibility();
     }
 
+    let originalParent: HTMLElement | null = null;
+
     function updateRhpaneVisibility() {
-        // Find the plugin-rhpane container and hide/show it based on window mode
         setTimeout(() => {
-            const rhpane = document.querySelector('.plugin-rhpane');
-            if (rhpane) {
-                if (settings.windowMode === 'floating') {
-                    (rhpane as HTMLElement).style.width = '0';
-                    (rhpane as HTMLElement).style.minWidth = '0';
-                    (rhpane as HTMLElement).style.padding = '0';
-                    (rhpane as HTMLElement).style.overflow = 'visible';
-                } else {
-                    (rhpane as HTMLElement).style.width = '';
-                    (rhpane as HTMLElement).style.minWidth = '';
-                    (rhpane as HTMLElement).style.padding = '';
-                    (rhpane as HTMLElement).style.overflow = '';
+            if (settings.windowMode === 'floating' && floatingWindowEl) {
+                // Store original parent and move floating window to body
+                if (!originalParent) {
+                    originalParent = floatingWindowEl.parentElement as HTMLElement;
                 }
+                document.body.appendChild(floatingWindowEl);
+                // Close the rhpane properly so Windy reclaims the space
+                bcast.emit('rqstClose', name);
+            } else if (settings.windowMode === 'panel' && floatingWindowEl && originalParent) {
+                // Move back to original parent and reopen plugin
+                originalParent.appendChild(floatingWindowEl);
+                bcast.emit('rqstOpen', name);
+                originalParent = null;
             }
-            map.invalidateSize();
+            // Trigger map resize
+            setTimeout(() => {
+                if (typeof W !== 'undefined' && W.map && W.map.map) {
+                    W.map.map.invalidateSize();
+                }
+            }, 100);
         }, 50);
     }
 
@@ -3127,13 +3135,9 @@
         window.removeEventListener('keydown', handleKeyDown);
         // Clean up window resize listener
         window.removeEventListener('resize', handleWindowResize);
-        // Restore rhpane if it was hidden
-        const rhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
-        if (rhpane) {
-            rhpane.style.width = '';
-            rhpane.style.minWidth = '';
-            rhpane.style.padding = '';
-            rhpane.style.overflow = '';
+        // Clean up floating window if it was moved to body
+        if (floatingWindowEl && floatingWindowEl.parentElement === document.body) {
+            floatingWindowEl.remove();
         }
     });
 </script>
