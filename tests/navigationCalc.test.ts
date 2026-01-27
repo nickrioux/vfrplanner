@@ -6,11 +6,15 @@ import {
     calculateDistance,
     calculateHeadwindComponent,
     calculateGroundSpeed,
+    calculateWindComponents,
+    calculateLeg,
+    calculateFlightPlanNavigation,
     formatDistance,
     formatBearing,
     formatEte,
     formatHeadwind,
 } from '../src/services/navigationCalc';
+import type { Waypoint } from '../src/types/flightPlan';
 
 describe('Navigation Calculations', () => {
     describe('calculateBearing', () => {
@@ -171,6 +175,141 @@ describe('Navigation Calculations', () => {
 
         it('formats no wind', () => {
             expect(formatHeadwind(0)).toBe('No wind');
+        });
+    });
+
+    describe('calculateWindComponents', () => {
+        it('calculates full headwind and zero crosswind when flying into wind', () => {
+            const result = calculateWindComponents(0, 0, 20);
+            expect(result.headwind).toBeCloseTo(20, 1);
+            expect(result.crosswind).toBeCloseTo(0, 1);
+        });
+
+        it('calculates full tailwind and zero crosswind when wind from behind', () => {
+            const result = calculateWindComponents(0, 180, 20);
+            expect(result.headwind).toBeCloseTo(-20, 1);
+            expect(result.crosswind).toBeCloseTo(0, 1);
+        });
+
+        it('calculates zero headwind and full crosswind with 90 degree crosswind', () => {
+            // Flying north (0), wind from east (90) = right crosswind
+            const result = calculateWindComponents(0, 90, 20);
+            expect(result.headwind).toBeCloseTo(0, 1);
+            expect(result.crosswind).toBeCloseTo(-20, 1);
+        });
+
+        it('calculates partial headwind and crosswind at 45 degrees', () => {
+            const result = calculateWindComponents(0, 45, 20);
+            const expected = 20 * Math.cos(Math.PI / 4);
+            expect(result.headwind).toBeCloseTo(expected, 1);
+            expect(Math.abs(result.crosswind)).toBeCloseTo(expected, 1);
+        });
+    });
+
+    describe('calculateLeg', () => {
+        const fromWaypoint: Waypoint = {
+            id: '1',
+            name: 'CYUL',
+            lat: 45.4706,
+            lon: -73.7408,
+            type: 'AIRPORT',
+        };
+
+        const toWaypoint: Waypoint = {
+            id: '2',
+            name: 'CYHU',
+            lat: 45.5175,
+            lon: -73.4169,
+            type: 'AIRPORT',
+        };
+
+        it('calculates leg without wind data', () => {
+            const leg = calculateLeg(fromWaypoint, toWaypoint, 100);
+            expect(leg.distance).toBeGreaterThan(12);
+            expect(leg.distance).toBeLessThan(18);
+            expect(leg.bearing).toBeGreaterThan(60);
+            expect(leg.bearing).toBeLessThan(80);
+            expect(leg.groundSpeed).toBe(100);
+            expect(leg.ete).toBeGreaterThan(0);
+        });
+
+        it('calculates leg with wind data', () => {
+            const leg = calculateLeg(fromWaypoint, toWaypoint, 100, 270, 20);
+            expect(leg.distance).toBeGreaterThan(12);
+            expect(leg.groundSpeed).toBeDefined();
+            expect(leg.groundSpeed).not.toBe(100); // Should be affected by wind
+            expect(leg.ete).toBeGreaterThan(0);
+        });
+
+        it('calculates ETE based on ground speed', () => {
+            const leg = calculateLeg(fromWaypoint, toWaypoint, 100);
+            // ETE = (distance / groundSpeed) * 60
+            const expectedEte = (leg.distance / 100) * 60;
+            expect(leg.ete).toBeCloseTo(expectedEte, 1);
+        });
+    });
+
+    describe('calculateFlightPlanNavigation', () => {
+        const waypoints: Waypoint[] = [
+            { id: '1', name: 'CYUL', lat: 45.4706, lon: -73.7408, type: 'AIRPORT' },
+            { id: '2', name: 'WPT1', lat: 45.5, lon: -73.5, type: 'USER WAYPOINT' },
+            { id: '3', name: 'CYHU', lat: 45.5175, lon: -73.4169, type: 'AIRPORT' },
+        ];
+
+        it('returns empty result for empty waypoints', () => {
+            const result = calculateFlightPlanNavigation([]);
+            expect(result.waypoints).toEqual([]);
+            expect(result.totals.distance).toBe(0);
+            expect(result.totals.ete).toBe(0);
+        });
+
+        it('handles single waypoint', () => {
+            const result = calculateFlightPlanNavigation([waypoints[0]]);
+            expect(result.waypoints.length).toBe(1);
+            expect(result.waypoints[0].distance).toBe(0);
+            expect(result.waypoints[0].bearing).toBe(0);
+            expect(result.totals.distance).toBe(0);
+        });
+
+        it('calculates navigation for multiple waypoints', () => {
+            const result = calculateFlightPlanNavigation(waypoints, 100);
+
+            expect(result.waypoints.length).toBe(3);
+
+            // First waypoint has no leg data
+            expect(result.waypoints[0].distance).toBe(0);
+            expect(result.waypoints[0].bearing).toBe(0);
+
+            // Subsequent waypoints have leg data
+            expect(result.waypoints[1].distance).toBeGreaterThan(0);
+            expect(result.waypoints[1].bearing).toBeGreaterThan(0);
+            expect(result.waypoints[2].distance).toBeGreaterThan(0);
+
+            // Totals
+            expect(result.totals.distance).toBeGreaterThan(0);
+            expect(result.totals.ete).toBeGreaterThan(0);
+        });
+
+        it('calculates total distance as sum of legs', () => {
+            const result = calculateFlightPlanNavigation(waypoints, 100);
+            const sumOfLegs = result.waypoints[1].distance! + result.waypoints[2].distance!;
+            expect(result.totals.distance).toBeCloseTo(sumOfLegs, 5);
+        });
+
+        it('calculates average ground speed', () => {
+            const result = calculateFlightPlanNavigation(waypoints, 100);
+            expect(result.totals.averageGroundSpeed).toBeCloseTo(100, 0);
+        });
+
+        it('calculates average headwind when wind data present', () => {
+            const waypointsWithWind: Waypoint[] = [
+                { id: '1', name: 'CYUL', lat: 45.4706, lon: -73.7408, type: 'AIRPORT' },
+                { id: '2', name: 'WPT1', lat: 45.5, lon: -73.5, type: 'USER WAYPOINT', windDir: 270, windSpeed: 20 },
+                { id: '3', name: 'CYHU', lat: 45.5175, lon: -73.4169, type: 'AIRPORT', windDir: 270, windSpeed: 20 },
+            ];
+
+            const result = calculateFlightPlanNavigation(waypointsWithWind, 100);
+            expect(result.totals.averageHeadwind).toBeDefined();
         });
     });
 });
