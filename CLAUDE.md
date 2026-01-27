@@ -1,5 +1,9 @@
 # VFR Planner Plugin - Project Notes
 
+## Git Commits
+
+Do NOT add "Co-Authored-By" lines to commit messages.
+
 ## Version Updates
 
 When updating the plugin version, update **both** files:
