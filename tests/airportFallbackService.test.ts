@@ -23,8 +23,9 @@ describe('airportFallbackService', () => {
             const meta = getFallbackMeta();
             expect(meta.source).toBe('OurAirports');
             expect(meta.count).toBeGreaterThan(0);
-            expect(meta.regions.canada).toBeDefined();
-            expect(meta.regions.us).toBeDefined();
+            expect(meta.coverage.types).toBeDefined();
+            expect(meta.coverage.northAmerica).toBeDefined();
+            expect(meta.coverage.europe).toBeDefined();
         });
     });
 
@@ -44,8 +45,8 @@ describe('airportFallbackService', () => {
         });
 
         it('returns false for airport outside coverage', () => {
-            // LAX is in California, not in NE US
-            expect(hasAirport('KLAX')).toBe(false);
+            // VHHH (Hong Kong) is outside NA + Europe coverage
+            expect(hasAirport('VHHH')).toBe(false);
         });
 
         it('handles lowercase input', () => {
@@ -88,7 +89,8 @@ describe('airportFallbackService', () => {
         });
 
         it('returns null for out-of-coverage airport', () => {
-            expect(getAirportByIcao('KLAX')).toBeNull();
+            // VHHH (Hong Kong) is outside NA + Europe coverage
+            expect(getAirportByIcao('VHHH')).toBeNull();
         });
     });
 

@@ -49,8 +49,8 @@ describe('airportProvider', () => {
 
         it('returns coverage description', () => {
             const coverage = provider.getCoverageDescription();
-            expect(coverage).toContain('Canada');
-            expect(coverage).toContain('US');
+            expect(coverage).toContain('North America');
+            expect(coverage).toContain('Europe');
         });
 
         it('finds Canadian airport', async () => {
@@ -68,7 +68,8 @@ describe('airportProvider', () => {
         });
 
         it('returns null for out-of-coverage airport', async () => {
-            const result = await provider.searchByIcao('KLAX');
+            // VHHH (Hong Kong) is outside NA + Europe coverage
+            const result = await provider.searchByIcao('VHHH');
             expect(result).toBeNull();
         });
 

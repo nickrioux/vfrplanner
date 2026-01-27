@@ -20,12 +20,18 @@ const OUTPUT_FILE = path.join(__dirname, '..', 'src', 'data', 'airports-fallback
 const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 const MAX_FILE_SIZE_KB = 500;
 
-// Geographic filters
-const CANADA_REGION_PREFIX = 'CA-';
-const US_STATES = ['US-ME', 'US-NH', 'US-VT', 'US-NY', 'US-MA', 'US-CT', 'US-RI', 'US-PA', 'US-NJ', 'US-MI', 'US-OH', 'US-MN', 'US-WI'];
+// Geographic filters - North America + Europe
+const NORTH_AMERICA_COUNTRIES = ['CA', 'US', 'MX'];
+const EUROPE_COUNTRIES = [
+    'GB', 'FR', 'DE', 'ES', 'IT', 'NL', 'BE', 'CH', 'AT', 'PT',
+    'IE', 'DK', 'NO', 'SE', 'FI', 'PL', 'CZ', 'GR', 'HU', 'RO',
+    'BG', 'HR', 'SK', 'SI', 'LT', 'LV', 'EE', 'IS', 'LU', 'MT',
+    'CY', 'RS', 'BA', 'ME', 'MK', 'AL', 'XK'
+];
+const COVERED_COUNTRIES = [...NORTH_AMERICA_COUNTRIES, ...EUROPE_COUNTRIES];
 
-// Airport type filters
-const INCLUDED_TYPES = ['large_airport', 'medium_airport', 'small_airport', 'seaplane_base'];
+// Airport type filters - Large and Medium only for broader coverage
+const INCLUDED_TYPES = ['large_airport', 'medium_airport'];
 
 /**
  * Download a file with caching
@@ -125,12 +131,11 @@ function parseCSVLine(line) {
 }
 
 /**
- * Check if airport is in covered region
+ * Check if airport is in covered country (NA or Europe)
  */
-function isInCoveredRegion(region) {
-    if (!region) return false;
-    if (region.startsWith(CANADA_REGION_PREFIX)) return true;
-    return US_STATES.includes(region);
+function isInCoveredCountry(country) {
+    if (!country) return false;
+    return COVERED_COUNTRIES.includes(country);
 }
 
 /**
@@ -141,14 +146,14 @@ function isIncludedType(type) {
 }
 
 /**
- * Check if ident is a valid ICAO code for our regions
- * Canada: C*** (4 chars starting with C)
- * US: K*** (4 chars starting with K)
+ * Check if ident is a valid ICAO code
+ * ICAO codes are typically 4 characters (some regions use 3)
+ * We accept any alphanumeric code of 3-4 characters
  */
 function isValidIcaoCode(ident) {
-    if (!ident || ident.length !== 4) return false;
-    const first = ident[0].toUpperCase();
-    return first === 'C' || first === 'K';
+    if (!ident) return false;
+    if (ident.length < 3 || ident.length > 4) return false;
+    return /^[A-Z0-9]+$/i.test(ident);
 }
 
 /**
@@ -209,9 +214,9 @@ async function generate(forceRefresh = false) {
     console.log(`  Total airports: ${allAirports.length}`);
     console.log(`  Total runways: ${allRunways.length}`);
 
-    // Filter airports - only valid ICAO codes in covered regions
+    // Filter airports - only valid ICAO codes in covered countries (NA + Europe)
     const filteredAirports = allAirports.filter(apt =>
-        isInCoveredRegion(apt.iso_region) &&
+        isInCoveredCountry(apt.iso_country) &&
         isIncludedType(apt.type) &&
         isValidIcaoCode(apt.ident)
     );
@@ -267,9 +272,10 @@ async function generate(forceRefresh = false) {
             source: 'OurAirports',
             sourceUrl: 'https://ourairports.com/data/',
             count: Object.keys(airports).length,
-            regions: {
-                canada: 'All provinces/territories',
-                us: US_STATES.map(s => s.replace('US-', '')).join(', ')
+            coverage: {
+                types: 'Large and medium airports',
+                northAmerica: 'Canada, USA, Mexico',
+                europe: 'All EU/EEA countries + UK, Switzerland, Balkans'
             }
         },
         airports

@@ -147,7 +147,7 @@ class FallbackProvider implements IAirportProvider {
 
     getCoverageDescription(): string {
         const meta = getFallbackMeta();
-        return `Canada + NE US (${meta.regions.us})`;
+        return `North America + Europe (${meta.coverage.types})`;
     }
 }
 

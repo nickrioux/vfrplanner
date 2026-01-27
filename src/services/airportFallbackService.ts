@@ -58,9 +58,10 @@ export interface FallbackMeta {
     generated: string;
     source: string;
     count: number;
-    regions: {
-        canada: string;
-        us: string;
+    coverage: {
+        types: string;
+        northAmerica: string;
+        europe: string;
     };
 }
 
