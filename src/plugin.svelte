@@ -575,12 +575,12 @@
                     <button
                         class="toggle-btn"
                         class:active={settings.windowMode === 'panel'}
-                        on:click={() => { settings.windowMode = 'panel'; saveSession(); setTimeout(() => map.invalidateSize(), 100); }}
+                        on:click={() => { settings.windowMode = 'panel'; saveSession(); updateRhpaneVisibility(); }}
                     >Panel</button>
                     <button
                         class="toggle-btn"
                         class:active={settings.windowMode === 'floating'}
-                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); setTimeout(() => map.invalidateSize(), 100); }}
+                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); updateRhpaneVisibility(); }}
                     >Floating</button>
                 </div>
                 <div class="setting-description">
@@ -1951,10 +1951,26 @@
             floatingWindow = { ...settings.floatingWindow };
         }
         saveSession();
-        // Trigger map resize after switching modes
+        updateRhpaneVisibility();
+    }
+
+    function updateRhpaneVisibility() {
+        // Find the rhpane container and hide/show it based on window mode
         setTimeout(() => {
+            const rhpane = document.getElementById('rhpane');
+            if (rhpane) {
+                if (settings.windowMode === 'floating') {
+                    rhpane.style.width = '0';
+                    rhpane.style.minWidth = '0';
+                    rhpane.style.overflow = 'visible';
+                } else {
+                    rhpane.style.width = '';
+                    rhpane.style.minWidth = '';
+                    rhpane.style.overflow = '';
+                }
+            }
             map.invalidateSize();
-        }, 100);
+        }, 50);
     }
 
     function handleExportGPX() {
@@ -3094,6 +3110,10 @@
         window.addEventListener('keydown', handleKeyDown);
         // Listen for window resize to update mobile state
         window.addEventListener('resize', handleWindowResize);
+        // Apply rhpane visibility based on saved window mode
+        if (settings.windowMode === 'floating') {
+            updateRhpaneVisibility();
+        }
     });
 
     onDestroy(() => {
@@ -3105,6 +3125,13 @@
         window.removeEventListener('keydown', handleKeyDown);
         // Clean up window resize listener
         window.removeEventListener('resize', handleWindowResize);
+        // Restore rhpane if it was hidden
+        const rhpane = document.getElementById('rhpane');
+        if (rhpane) {
+            rhpane.style.width = '';
+            rhpane.style.minWidth = '';
+            rhpane.style.overflow = '';
+        }
     });
 </script>
 
