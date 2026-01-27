@@ -639,7 +639,8 @@
         type WeatherAlert,
         type ForecastTimeRange,
     } from './services/weatherService';
-    import { calculateProfileData, findBestRunway, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { calculateProfileData, type SegmentCondition, type BestRunwayResult } from './services/profileService';
+    import { getSegmentColor, getWaypointIcon, getMarkerColor, getBestRunway } from './utils/displayUtils';
     import { logger } from './services/logger';
     import { findVFRWindows, formatVFRWindow, type VFRWindow, type VFRWindowSearchResult } from './services/vfrWindowService';
     import type { MinimumConditionLevel, VFRWindowCSVData } from './types/vfrWindow';
@@ -665,14 +666,14 @@
     import AltitudeProfile from './components/AltitudeProfile.svelte';
     import SettingsPanel from './components/SettingsPanel.svelte';
     import ConditionsModal from './components/ConditionsModal.svelte';
+    import { createSessionStorage } from './services/sessionStorage';
 
     import type { LatLon } from '@windy/interfaces';
 
     const { name, title } = config;
 
-    // Storage keys for session persistence
-    const STORAGE_KEY = `vfr-planner-session-${name}`;
-    const WINDY_STORE_KEY = 'plugin-vfr-planner-session';
+    // Session storage instance
+    const sessionStorage = createSessionStorage(name);
 
     // State
     let flightPlan: FlightPlan | null = null;
@@ -771,53 +772,6 @@
     let routeLayer: L.LayerGroup | null = null;
     let waypointMarkers: L.LayerGroup | null = null;
     let markerMap: Map<string, L.Marker> = new Map();
-
-    /**
-     * Get segment color based on VFR condition
-     */
-    function getSegmentColor(condition?: SegmentCondition): string {
-        switch (condition) {
-            case 'good':
-                return '#4caf50'; // Green
-            case 'marginal':
-                return '#ff9800'; // Orange/Yellow
-            case 'poor':
-                return '#f44336'; // Red
-            case 'unknown':
-            default:
-                return '#757575'; // Gray
-        }
-    }
-
-    // Waypoint icons by type
-    function getWaypointIcon(type: WaypointType): string {
-        switch (type) {
-            case 'AIRPORT': return '🛫';
-            case 'VOR': return '📡';
-            case 'NDB': return '📻';
-            case 'INT':
-            case 'INT-VRP': return '📍';
-            case 'USER WAYPOINT':
-            default: return '📌';
-        }
-    }
-
-    function getMarkerColor(type: WaypointType): string {
-        switch (type) {
-            case 'AIRPORT': return '#e74c3c';
-            case 'VOR': return '#3498db';
-            case 'NDB': return '#9b59b6';
-            case 'INT':
-            case 'INT-VRP': return '#2ecc71';
-            case 'USER WAYPOINT':
-            default: return '#f39c12';
-        }
-    }
-
-    // Get best runway for given wind conditions
-    function getBestRunway(runways: RunwayInfo[], windDir: number, windSpeed: number, gustSpeed?: number): BestRunwayResult | null {
-        return findBestRunway(runways, windDir, windSpeed, gustSpeed);
-    }
 
     // Drag and drop handlers
     function handleDragOver(event: DragEvent) {
@@ -2658,85 +2612,7 @@
         map.fitBounds(bounds, { padding: [50, 50] });
     }
 
-    // Session persistence functions - Hybrid storage for mobile compatibility
-    // Uses @windy/store as primary (future cloud sync potential) with localStorage fallback
-
-    /**
-     * Save session data to @windy/store
-     * @returns true if save succeeded
-     */
-    function saveToWindyStore(data: object): boolean {
-        try {
-            // Cast to any to bypass strict typing - store accepts arbitrary values
-            (store as any).set(WINDY_STORE_KEY, data);
-            return true;
-        } catch (err) {
-            logger.warn('Failed to save to Windy store:', err);
-            return false;
-        }
-    }
-
-    /**
-     * Load session data from @windy/store
-     * @returns session data object or null if not found/error
-     */
-    function loadFromWindyStore(): object | null {
-        try {
-            const data = (store as any).get(WINDY_STORE_KEY);
-            if (data && typeof data === 'object') {
-                return data;
-            }
-            return null;
-        } catch (err) {
-            logger.warn('Failed to load from Windy store:', err);
-            return null;
-        }
-    }
-
-    /**
-     * Save session data to localStorage
-     * @returns true if save succeeded
-     */
-    function saveToLocalStorage(data: object): boolean {
-        try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-            return true;
-        } catch (err) {
-            logger.warn('Failed to save to localStorage:', err);
-            return false;
-        }
-    }
-
-    /**
-     * Load session data from localStorage
-     * @returns session data object or null if not found/error
-     */
-    function loadFromLocalStorage(): object | null {
-        try {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (!saved) return null;
-            return JSON.parse(saved);
-        } catch (err) {
-            logger.warn('Failed to load from localStorage:', err);
-            return null;
-        }
-    }
-
-    /**
-     * Clear session data from both storage systems
-     */
-    function clearSession() {
-        try {
-            (store as any).set(WINDY_STORE_KEY, null);
-        } catch (err) {
-            logger.warn('Failed to clear Windy store session:', err);
-        }
-        try {
-            localStorage.removeItem(STORAGE_KEY);
-        } catch (err) {
-            logger.warn('Failed to clear localStorage session:', err);
-        }
-    }
+    // Session persistence functions
 
     function saveSession() {
         try {
@@ -2755,18 +2631,10 @@
                 activeTab,
                 maxProfileAltitude,
                 profileScale,
-                version: '1.0', // For future migration
+                version: '1.0',
             };
 
-            // Save to both storage systems for redundancy
-            // Windy store: primary, potentially cloud-synced in future
-            // localStorage: fallback for mobile sandboxing issues
-            const windySaved = saveToWindyStore(sessionData);
-            const localSaved = saveToLocalStorage(sessionData);
-
-            if (!windySaved && !localSaved) {
-                logger.warn('Failed to save session to any storage');
-            }
+            sessionStorage.save(sessionData);
         } catch (err) {
             logger.warn('Failed to save session:', err);
         }
@@ -2774,14 +2642,7 @@
 
     function loadSession() {
         try {
-            // Try Windy store first (may be more reliable on mobile)
-            // Fall back to localStorage if Windy store has no data
-            let sessionData = loadFromWindyStore();
-
-            if (!sessionData) {
-                sessionData = loadFromLocalStorage();
-            }
-
+            const sessionData = sessionStorage.load();
             if (!sessionData) return;
 
             const data = sessionData as any;
@@ -2826,8 +2687,7 @@
             }
         } catch (err) {
             logger.warn('Failed to load session:', err);
-            // Clear corrupted session data from both stores
-            clearSession();
+            sessionStorage.clear();
         }
     }
 
