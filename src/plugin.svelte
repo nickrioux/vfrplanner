@@ -1,48 +1,22 @@
-<!-- Panel mode mobile header (hidden in floating mode) -->
-{#if settings.windowMode === 'panel'}
+<!-- Mobile header -->
 <div class="plugin__mobile-header">
     {title}
 </div>
-{/if}
 
 <section
     class="plugin__content"
-    class:floating-mode={settings.windowMode === 'floating'}
-    class:minimized={settings.windowMode === 'floating' && floatingWindow.minimized}
-    class:dragging={isDragging}
-    class:resizing={isResizing}
     class:mobile={isMobile}
-    style={settings.windowMode === 'floating' ? `left: ${floatingWindow.x}px; top: ${floatingWindow.y}px; width: ${floatingWindow.width}px; height: ${floatingWindow.minimized ? 'auto' : floatingWindow.height + 'px'};` : ''}
-    bind:this={floatingWindowEl}
 >
-    <!-- Floating mode header -->
-    {#if settings.windowMode === 'floating'}
-        <div class="floating-header" on:mousedown={startDrag} on:touchstart={startDrag}>
-            <span class="floating-title">✈️ {title}</span>
-            <div class="floating-controls">
-                <button class="floating-btn" on:click|stopPropagation={toggleMinimize} title={floatingWindow.minimized ? 'Expand' : 'Minimize'}>
-                    {floatingWindow.minimized ? '▢' : '−'}
-                </button>
-                <button class="floating-btn" on:click|stopPropagation={toggleWindowMode} title="Switch to panel mode">
-                    ⊟
-                </button>
-            </div>
-        </div>
-    {/if}
+    <!-- Panel mode title -->
+    <div
+        class="plugin__title plugin__title--chevron-back"
+        on:click={() => bcast.emit('rqstOpen', 'menu')}
+    >
+        {title}
+    </div>
 
-    <!-- Panel mode title (hidden in floating mode) -->
-    {#if settings.windowMode === 'panel'}
-        <div
-            class="plugin__title plugin__title--chevron-back"
-            on:click={() => bcast.emit('rqstOpen', 'menu')}
-        >
-            {title}
-        </div>
-    {/if}
-
-    <!-- Main content (hidden when minimized in floating mode) -->
-    {#if !(settings.windowMode === 'floating' && floatingWindow.minimized)}
-    <div class="main-content-scroll" class:floating-scroll={settings.windowMode === 'floating'}>
+    <!-- Main content -->
+    <div class="main-content-scroll">
 
     <!-- Tabs -->
     {#if flightPlan}
@@ -567,28 +541,6 @@
 
     <!-- Settings Tab -->
     {#if activeTab === 'settings' && flightPlan}
-        <!-- Window Mode toggle (kept separate from SettingsPanel) -->
-        <div class="settings-section window-mode-section">
-            <div class="setting-group">
-                <label class="setting-label">Window Mode</label>
-                <div class="setting-toggle">
-                    <button
-                        class="toggle-btn"
-                        class:active={settings.windowMode === 'panel'}
-                        on:click={() => { settings.windowMode = 'panel'; saveSession(); updateRhpaneVisibility(); }}
-                    >Panel</button>
-                    <button
-                        class="toggle-btn"
-                        class:active={settings.windowMode === 'floating'}
-                        on:click={() => { settings.windowMode = 'floating'; floatingWindow = { ...settings.floatingWindow }; saveSession(); updateRhpaneVisibility(); }}
-                    >Floating</button>
-                </div>
-                <div class="setting-description">
-                    Panel mode uses Windy's right-hand pane. Floating mode creates a draggable, resizable window.
-                </div>
-            </div>
-        </div>
-
         <!-- Settings Panel Component -->
         <SettingsPanel
             bind:settings
@@ -653,19 +605,6 @@
     {/if}
 
     </div><!-- /main-content-scroll -->
-    {/if}<!-- /minimized content check -->
-
-    <!-- Resize handles for floating mode -->
-    {#if settings.windowMode === 'floating' && !floatingWindow.minimized}
-        <div class="resize-handle resize-n" on:mousedown={(e) => startResize(e, 'n')} on:touchstart={(e) => startResize(e, 'n')}></div>
-        <div class="resize-handle resize-s" on:mousedown={(e) => startResize(e, 's')} on:touchstart={(e) => startResize(e, 's')}></div>
-        <div class="resize-handle resize-e" on:mousedown={(e) => startResize(e, 'e')} on:touchstart={(e) => startResize(e, 'e')}></div>
-        <div class="resize-handle resize-w" on:mousedown={(e) => startResize(e, 'w')} on:touchstart={(e) => startResize(e, 'w')}></div>
-        <div class="resize-handle resize-ne" on:mousedown={(e) => startResize(e, 'ne')} on:touchstart={(e) => startResize(e, 'ne')}></div>
-        <div class="resize-handle resize-nw" on:mousedown={(e) => startResize(e, 'nw')} on:touchstart={(e) => startResize(e, 'nw')}></div>
-        <div class="resize-handle resize-se" on:mousedown={(e) => startResize(e, 'se')} on:touchstart={(e) => startResize(e, 'se')}></div>
-        <div class="resize-handle resize-sw" on:mousedown={(e) => startResize(e, 'sw')} on:touchstart={(e) => startResize(e, 'sw')}></div>
-    {/if}
 
     <!-- Conditions Modal -->
     <ConditionsModal
