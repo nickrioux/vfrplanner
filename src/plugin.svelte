@@ -640,6 +640,14 @@
                     <li>Elevation data: <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a></li>
                 </ul>
             </div>
+
+            <div class="about-support">
+                <h4>☕ Support This Project</h4>
+                <p>If you find this plugin useful, consider buying me a coffee!</p>
+                <a href="https://buymeacoffee.com/wingguideai" target="_blank" rel="noopener" class="coffee-link">
+                    Buy me a coffee
+                </a>
+            </div>
         </div>
     {/if}
 
@@ -4844,6 +4852,45 @@
             &:hover,
             &:active {
                 text-decoration: underline;
+            }
+        }
+    }
+
+    .about-support {
+        margin-top: 15px;
+        background: rgba(255, 200, 87, 0.1);
+        border-radius: 6px;
+        padding: 12px;
+        text-align: center;
+
+        h4 {
+            margin: 0 0 8px 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.85);
+        }
+
+        p {
+            margin: 0 0 12px 0;
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .coffee-link {
+            display: inline-block;
+            padding: 8px 16px;
+            background: #ffdd00;
+            color: #000;
+            font-weight: 600;
+            font-size: 13px;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background 0.2s;
+
+            &:hover,
+            &:active {
+                background: #e5c700;
+                text-decoration: none;
             }
         }
     }
