@@ -18,6 +18,7 @@ import {
     interpolateWindDirection,
     CLEAR_SKY_METERS,
 } from './weatherHelpers';
+import { logger } from './logger';
 
 /** Wind data at a specific pressure level */
 export interface LevelWind {
@@ -213,8 +214,8 @@ export async function fetchVerticalWindData(
         };
 
         if (enableLogging) {
-            console.log(`[VFR Debug] ========== getMeteogramForecastData REQUEST ==========`);
-            console.log(`[VFR Debug] Request params:`, JSON.stringify(requestParams, null, 2));
+            logger.debug(`[Weather] ========== getMeteogramForecastData REQUEST ==========`);
+            logger.debug(`[Weather] Request params:`, JSON.stringify(requestParams, null, 2));
         }
 
         // Use getMeteogramForecastData with extended: 'true' to get all pressure levels
@@ -226,41 +227,41 @@ export async function fetchVerticalWindData(
         );
 
         if (enableLogging) {
-            console.log(`[VFR Debug] ========== getMeteogramForecastData RAW RESPONSE ==========`);
-            console.log(`[VFR Debug] Full result object:`, result);
-            console.log(`[VFR Debug] Result type:`, typeof result);
-            console.log(`[VFR Debug] Result keys:`, result ? Object.keys(result) : 'null');
+            logger.debug(`[Weather] ========== getMeteogramForecastData RAW RESPONSE ==========`);
+            logger.debug(`[Weather] Full result object:`, result);
+            logger.debug(`[Weather] Result type:`, typeof result);
+            logger.debug(`[Weather] Result keys:`, result ? Object.keys(result) : 'null');
 
             if (result?.data) {
-                console.log(`[VFR Debug] result.data keys:`, Object.keys(result.data));
-                console.log(`[VFR Debug] result.data:`, result.data);
+                logger.debug(`[Weather] result.data keys:`, Object.keys(result.data));
+                logger.debug(`[Weather] result.data:`, result.data);
             }
 
             if (result?.data?.data) {
                 const dataKeys = Object.keys(result.data.data);
-                console.log(`[VFR Debug] result.data.data keys (${dataKeys.length}):`, dataKeys);
+                logger.debug(`[Weather] result.data.data keys (${dataKeys.length}):`, dataKeys);
                 // Show wind-related keys specifically
                 const windKeys = dataKeys.filter(k => k.includes('wind') || k.includes('Wind'));
-                console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+                logger.debug(`[Weather] Wind-related keys:`, windKeys);
                 // Log sample values for first wind key
                 if (windKeys.length > 0) {
-                    console.log(`[VFR Debug] Sample ${windKeys[0]}:`, result.data.data[windKeys[0]]);
+                    logger.debug(`[Weather] Sample ${windKeys[0]}:`, result.data.data[windKeys[0]]);
                 }
                 // Show cbase-related keys
                 const cbaseKeys = dataKeys.filter(k => k.includes('cbase') || k.includes('cloud'));
-                console.log(`[VFR Debug] Cbase/cloud-related keys:`, cbaseKeys);
+                logger.debug(`[Weather] Cbase/cloud-related keys:`, cbaseKeys);
                 if (cbaseKeys.length > 0) {
-                    console.log(`[VFR Debug] Sample ${cbaseKeys[0]}:`, result.data.data[cbaseKeys[0]]);
+                    logger.debug(`[Weather] Sample ${cbaseKeys[0]}:`, result.data.data[cbaseKeys[0]]);
                 }
             }
-            console.log(`[VFR Debug] ========================================================`);
+            logger.debug(`[Weather] ========================================================`);
         }
 
         return result?.data?.data || null;
     } catch (error) {
-        console.error('[VFR Planner] Error fetching vertical wind data:', error);
+        logger.error('[Weather] Error fetching vertical wind data:', error);
         if (enableLogging) {
-            console.log(`[VFR Debug] Error details:`, error);
+            logger.debug(`[Weather] Error details:`, error);
         }
         return null;
     }
@@ -312,7 +313,7 @@ export function getWindAtAltitudeFromMeteogram(
 
     if (allWinds.length === 0) {
         if (enableLogging) {
-            console.log(`[VFR Debug] getWindAtAltitude: No wind levels found in meteogram data`);
+            logger.debug(`[Weather] getWindAtAltitude: No wind levels found in meteogram data`);
         }
         return null;
     }
@@ -321,7 +322,7 @@ export function getWindAtAltitudeFromMeteogram(
     const sortedWinds = [...allWinds].sort((a, b) => a.altitudeFeet - b.altitudeFeet);
 
     if (enableLogging) {
-        console.log(`[VFR Debug] getWindAtAltitude: target=${altitudeFt}ft, available levels:`,
+        logger.debug(`[Weather] getWindAtAltitude: target=${altitudeFt}ft, available levels:`,
             sortedWinds.map(w => `${w.level}(${w.altitudeFeet}ft)`));
     }
 
@@ -376,12 +377,12 @@ export function getWindAtAltitudeFromMeteogram(
         usedLevel = `${lowerWind.level}-${upperWind.level}`;
 
         if (enableLogging) {
-            console.log(`[VFR Debug] Interpolating: ${lowerWind.level}(${lowerWind.altitudeFeet}ft) -> ${upperWind.level}(${upperWind.altitudeFeet}ft), fraction=${fraction.toFixed(2)}`);
+            logger.debug(`[Weather] Interpolating: ${lowerWind.level}(${lowerWind.altitudeFeet}ft) -> ${upperWind.level}(${upperWind.altitudeFeet}ft), fraction=${fraction.toFixed(2)}`);
         }
     }
 
     if (enableLogging) {
-        console.log(`[VFR Debug] Result: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedLevel})`);
+        logger.debug(`[Weather] Result: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedLevel})`);
     }
 
     return {
@@ -425,8 +426,8 @@ function findWindKeyPairs(meteogramData: WindyMeteogramData, enableLogging: bool
     }
 
     if (enableLogging) {
-        console.log(`[VFR Debug] Found U keys:`, Array.from(uKeysByLevel.entries()));
-        console.log(`[VFR Debug] Found V keys:`, Array.from(vKeysByLevel.entries()));
+        logger.debug(`[Weather] Found U keys:`, Array.from(uKeysByLevel.entries()));
+        logger.debug(`[Weather] Found V keys:`, Array.from(vKeysByLevel.entries()));
     }
 
     // Match U and V keys by level
@@ -459,10 +460,10 @@ export function getAllWindLevelsFromMeteogram(
     const allKeys = Object.keys(meteogramData);
 
     if (enableLogging) {
-        console.log(`[VFR Debug] getAllWindLevels - total keys: ${allKeys.length}`);
+        logger.debug(`[Weather] getAllWindLevels - total keys: ${allKeys.length}`);
         // Log wind-related keys
         const windKeys = allKeys.filter(k => k.toLowerCase().includes('wind'));
-        console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+        logger.debug(`[Weather] Wind-related keys:`, windKeys);
     }
 
     // Try dynamic key discovery first
@@ -470,7 +471,7 @@ export function getAllWindLevelsFromMeteogram(
 
     if (keyPairs.size > 0) {
         if (enableLogging) {
-            console.log(`[VFR Debug] Using dynamic key discovery, found ${keyPairs.size} level pairs`);
+            logger.debug(`[Weather] Using dynamic key discovery, found ${keyPairs.size} level pairs`);
         }
 
         for (const [level, { uKey, vKey }] of keyPairs) {
@@ -487,7 +488,7 @@ export function getAllWindLevelsFromMeteogram(
                     if (!levelInfo) {
                         // Skip unknown levels to avoid wrong altitude calculations
                         if (enableLogging) {
-                            console.log(`[VFR Debug] Skipping unknown level: ${level}`);
+                            logger.debug(`[Weather] Skipping unknown level: ${level}`);
                         }
                         continue;
                     }
@@ -508,10 +509,10 @@ export function getAllWindLevelsFromMeteogram(
 
                     if (enableLogging) {
                         // Detailed U/V calculation logging
-                        console.log(`[VFR Debug] Level ${level} (${levelInfo.altitudeFeet}ft):`);
-                        console.log(`[VFR Debug]   Raw U/V: u=${u.toFixed(2)} m/s (eastward), v=${v.toFixed(2)} m/s (northward)`);
-                        console.log(`[VFR Debug]   Speed: sqrt(${u.toFixed(2)}² + ${v.toFixed(2)}²) = ${speedMs.toFixed(2)} m/s = ${speedKt.toFixed(0)} kt`);
-                        console.log(`[VFR Debug]   Dir: atan2(-${u.toFixed(2)}, -${v.toFixed(2)}) = ${(Math.atan2(-u, -v) * 180 / Math.PI).toFixed(1)}° -> ${Math.round(dir)}° (normalized)`);
+                        logger.debug(`[Weather] Level ${level} (${levelInfo.altitudeFeet}ft):`);
+                        logger.debug(`[Weather]   Raw U/V: u=${u.toFixed(2)} m/s (eastward), v=${v.toFixed(2)} m/s (northward)`);
+                        logger.debug(`[Weather]   Speed: sqrt(${u.toFixed(2)}² + ${v.toFixed(2)}²) = ${speedMs.toFixed(2)} m/s = ${speedKt.toFixed(0)} kt`);
+                        logger.debug(`[Weather]   Dir: atan2(-${u.toFixed(2)}, -${v.toFixed(2)}) = ${(Math.atan2(-u, -v) * 180 / Math.PI).toFixed(1)}° -> ${Math.round(dir)}° (normalized)`);
                     }
                 }
             }
@@ -521,7 +522,7 @@ export function getAllWindLevelsFromMeteogram(
     // Fallback: try predefined key formats
     if (winds.length === 0) {
         if (enableLogging) {
-            console.log(`[VFR Debug] Dynamic discovery found no winds, trying predefined formats...`);
+            logger.debug(`[Weather] Dynamic discovery found no winds, trying predefined formats...`);
         }
 
         for (const pl of METEOGRAM_PRESSURE_LEVELS) {
@@ -567,7 +568,7 @@ export function getAllWindLevelsFromMeteogram(
             }
 
             if (enableLogging && pl.level === '850h') {
-                console.log(`[VFR Debug] Predefined lookup for ${pl.level}: foundU=${foundUKey}(${u}), foundV=${foundVKey}(${v})`);
+                logger.debug(`[Weather] Predefined lookup for ${pl.level}: foundU=${foundUKey}(${u}), foundV=${foundVKey}(${v})`);
             }
 
             if (typeof u === 'number' && typeof v === 'number') {
@@ -589,7 +590,7 @@ export function getAllWindLevelsFromMeteogram(
     winds.sort((a, b) => a.altitudeFeet - b.altitudeFeet);
 
     if (enableLogging) {
-        console.log(`[VFR Debug] getAllWindLevels found ${winds.length} levels:`, winds.map(w => `${w.level}(${w.altitudeFeet}ft)`));
+        logger.debug(`[Weather] getAllWindLevels found ${winds.length} levels:`, winds.map(w => `${w.level}(${w.altitudeFeet}ft)`));
     }
 
     return winds;
@@ -715,7 +716,7 @@ export async function getForecastTimeRange(
             timestamps,
         };
     } catch (error) {
-        console.error('Failed to get forecast time range:', error);
+        logger.error('Failed to get forecast time range:', error);
         return null;
     }
 }
@@ -751,21 +752,21 @@ export async function fetchWaypointWeather(
                 levels = [...new Set(levels)];
                 
                 if (enableLogging && waypointName) {
-                    console.log(`[VFR Planner] Fetching weather for ${waypointName} at ${altitude} ft MSL`);
-                    console.log(`[VFR Planner] Interpolating between ${bracketingLevels.lower.level} (${bracketingLevels.lower.altitudeFeet}ft) and ${bracketingLevels.upper.level} (${bracketingLevels.upper.altitudeFeet}ft)`);
-                    console.log(`[VFR Planner] Interpolation fraction: ${(bracketingLevels.fraction * 100).toFixed(1)}%`);
+                    logger.debug(`[Weather] Fetching weather for ${waypointName} at ${altitude} ft MSL`);
+                    logger.debug(`[Weather] Interpolating between ${bracketingLevels.lower.level} (${bracketingLevels.lower.altitudeFeet}ft) and ${bracketingLevels.upper.level} (${bracketingLevels.upper.altitudeFeet}ft)`);
+                    logger.debug(`[Weather] Interpolation fraction: ${(bracketingLevels.fraction * 100).toFixed(1)}%`);
                 }
             } else {
                 // Fallback to single level if bracketing fails
                 const pressureLevel = altitudeToPressureLevel(altitude);
                 levels = pressureLevel === 'surface' ? ['surface'] : ['surface', pressureLevel];
                 if (enableLogging && waypointName) {
-                    console.log(`[VFR Planner] Fetching weather for ${waypointName} at ${altitude} ft MSL (pressure level: ${pressureLevel})`);
+                    logger.debug(`[Weather] Fetching weather for ${waypointName} at ${altitude} ft MSL (pressure level: ${pressureLevel})`);
                 }
             }
         } else {
             if (enableLogging && waypointName) {
-                console.log(`[VFR Planner] Fetching weather for ${waypointName} at surface`);
+                logger.debug(`[Weather] Fetching weather for ${waypointName} at surface`);
             }
         }
 
@@ -802,7 +803,7 @@ export async function fetchWaypointWeather(
             } catch (pointForecastError) {
                 // getPointForecastData doesn't support levels, try direct API call
                 if (enableLogging && waypointName) {
-                    console.log(`[VFR Planner] getPointForecastData doesn't support levels, trying direct API for ${waypointName}`);
+                    logger.debug(`[Weather] getPointForecastData doesn't support levels, trying direct API for ${waypointName}`);
                 }
                 
                 const requestBody = {
@@ -848,7 +849,7 @@ export async function fetchWaypointWeather(
         } catch (apiError) {
             // If both methods fail, fall back to getPointForecastData for surface data
             if (enableLogging && waypointName) {
-                console.warn(`[VFR Planner] Point Forecast API failed for ${waypointName}, falling back to surface data:`, apiError);
+                logger.warn(`[Weather] Point Forecast API failed for ${waypointName}, falling back to surface data:`, apiError);
             }
             // Fall back to original method for surface data only
             const fallbackResponse: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
@@ -862,7 +863,7 @@ export async function fetchWaypointWeather(
             // Clear bracketing levels since we're using surface data only
             bracketingLevels = null;
             if (enableLogging && waypointName) {
-                console.log(`[VFR Planner] Using surface data fallback for ${waypointName}`);
+                logger.debug(`[Weather] Using surface data fallback for ${waypointName}`);
             }
         }
 
@@ -871,11 +872,11 @@ export async function fetchWaypointWeather(
 
         // Debug: log available data keys and wind at all levels
         if (enableLogging && waypointName) {
-            console.log(`[VFR Debug] Response data keys for ${waypointName}:`, Object.keys(responseData || {}));
+            logger.debug(`[Weather] Response data keys for ${waypointName}:`, Object.keys(responseData || {}));
 
             // Check for wind-specific keys
             const windKeys = Object.keys(responseData || {}).filter(k => k.includes('wind'));
-            console.log(`[VFR Debug] Wind-related keys:`, windKeys);
+            logger.debug(`[Weather] Wind-related keys:`, windKeys);
 
             // Log wind at all available pressure levels
             const levels = [
@@ -890,7 +891,7 @@ export async function fetchWaypointWeather(
                 { key: '200h', alt: '39,000 ft', desc: 'Upper troposphere' },
             ];
 
-            console.log(`[VFR Debug] ===== Wind at all levels for ${waypointName} =====`);
+            logger.debug(`[Weather] ===== Wind at all levels for ${waypointName} =====`);
             levels.forEach(level => {
                 const windKey = level.key === 'surface' ? 'wind' : `wind-${level.key}`;
                 const windDirKey = level.key === 'surface' ? 'windDir' : `windDir-${level.key}`;
@@ -903,12 +904,12 @@ export async function fetchWaypointWeather(
                     const windMs = windArr[0];
                     const windKt = Math.round(windMs * 1.94384);
                     const windDeg = Math.round(windDirArr[0]);
-                    console.log(`[VFR Debug]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): ${String(windDeg).padStart(3, '0')}° @ ${String(windKt).padStart(2)}kt - ${level.desc}`);
+                    logger.debug(`[Weather]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): ${String(windDeg).padStart(3, '0')}° @ ${String(windKt).padStart(2)}kt - ${level.desc}`);
                 } else {
-                    console.log(`[VFR Debug]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): N/A - ${level.desc}`);
+                    logger.debug(`[Weather]   ${level.key.padEnd(8)} (${level.alt.padEnd(10)}): N/A - ${level.desc}`);
                 }
             });
-            console.log(`[VFR Debug] ================================================`);
+            logger.debug(`[Weather] ================================================`);
         }
 
         // Get wind data at flight altitude using meteogram vertical data
@@ -919,17 +920,17 @@ export async function fetchWaypointWeather(
         let verticalWinds: LevelWind[] = [];
 
         // Fetch meteogram data for vertical wind levels
-        console.log(`[VFR Debug] Fetching meteogram for ${waypointName}, altitude=${altitude}...`);
+        logger.debug(`[Weather] Fetching meteogram for ${waypointName}, altitude=${altitude}...`);
         const meteogramData = await fetchVerticalWindData(lat, lon, true); // Always log for debugging
-        console.log(`[VFR Debug] Meteogram result for ${waypointName}:`, meteogramData ? `${Object.keys(meteogramData).length} keys` : 'NULL');
+        logger.debug(`[Weather] Meteogram result for ${waypointName}:`, meteogramData ? `${Object.keys(meteogramData).length} keys` : 'NULL');
 
         if (meteogramData) {
             // Get all wind levels
             verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, 0, true); // Always log for debugging
-            console.log(`[VFR Debug] Extracted ${verticalWinds.length} vertical wind levels`);
+            logger.debug(`[Weather] Extracted ${verticalWinds.length} vertical wind levels`);
 
             if (enableLogging && waypointName) {
-                console.log(`[VFR Planner] Vertical winds for ${waypointName}:`, verticalWinds.map(w =>
+                logger.debug(`[Weather] Vertical winds for ${waypointName}:`, verticalWinds.map(w =>
                     `${w.level}(${w.altitudeFeet}ft): ${Math.round(w.windDir)}°@${Math.round(w.windSpeed)}kt`
                 ).join(', '));
             }
@@ -943,7 +944,7 @@ export async function fetchWaypointWeather(
                     usedPressureLevel = altitudeWind.level;
 
                     if (enableLogging && waypointName) {
-                        console.log(`[VFR Planner] ✓ Wind at ${altitude}ft for ${waypointName}: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedPressureLevel})`);
+                        logger.debug(`[Weather] ✓ Wind at ${altitude}ft for ${waypointName}: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedPressureLevel})`);
                     }
                 }
             }
@@ -962,29 +963,29 @@ export async function fetchWaypointWeather(
             const pfWindSpeedMs = surfaceWindData[0];
             const pfWindSpeedKt = pfWindSpeedMs * 1.94384;
             const pfWindDir = surfaceWindDirData[0];
-            console.log(`[VFR Debug] === WIND DATA COMPARISON for ${waypointName} ===`);
-            console.log(`[VFR Debug] Point Forecast (what Windy shows):`);
-            console.log(`[VFR Debug]   Surface wind: ${Math.round(pfWindDir)}° @ ${Math.round(pfWindSpeedKt)} kt`);
+            logger.debug(`[Weather] === WIND DATA COMPARISON for ${waypointName} ===`);
+            logger.debug(`[Weather] Point Forecast (what Windy shows):`);
+            logger.debug(`[Weather]   Surface wind: ${Math.round(pfWindDir)}° @ ${Math.round(pfWindSpeedKt)} kt`);
 
             if (verticalWinds.length > 0) {
                 const surfaceFromMeteogram = verticalWinds.find(w => w.level === '1000h' || w.altitudeFeet < 1000);
                 if (surfaceFromMeteogram) {
-                    console.log(`[VFR Debug] Meteogram (calculated from U/V):`);
-                    console.log(`[VFR Debug]   ${surfaceFromMeteogram.level}: ${Math.round(surfaceFromMeteogram.windDir)}° @ ${Math.round(surfaceFromMeteogram.windSpeed)} kt`);
+                    logger.debug(`[Weather] Meteogram (calculated from U/V):`);
+                    logger.debug(`[Weather]   ${surfaceFromMeteogram.level}: ${Math.round(surfaceFromMeteogram.windDir)}° @ ${Math.round(surfaceFromMeteogram.windSpeed)} kt`);
                     const dirDiff = Math.abs(pfWindDir - surfaceFromMeteogram.windDir);
                     const speedDiff = Math.abs(pfWindSpeedKt - surfaceFromMeteogram.windSpeed);
                     if (dirDiff > 10 || speedDiff > 5) {
-                        console.log(`[VFR Debug] ⚠️ DISCREPANCY DETECTED!`);
-                        console.log(`[VFR Debug]   Direction diff: ${dirDiff.toFixed(0)}°, Speed diff: ${speedDiff.toFixed(0)} kt`);
+                        logger.debug(`[Weather] ⚠️ DISCREPANCY DETECTED!`);
+                        logger.debug(`[Weather]   Direction diff: ${dirDiff.toFixed(0)}°, Speed diff: ${speedDiff.toFixed(0)} kt`);
                     }
                 }
             }
 
             if (windSpeed !== undefined && windDir !== undefined) {
-                console.log(`[VFR Debug] Selected altitude wind (${usedPressureLevel}):`);
-                console.log(`[VFR Debug]   ${Math.round(windDir)}° @ ${Math.round(windSpeed)} kt`);
+                logger.debug(`[Weather] Selected altitude wind (${usedPressureLevel}):`);
+                logger.debug(`[Weather]   ${Math.round(windDir)}° @ ${Math.round(windSpeed)} kt`);
             }
-            console.log(`[VFR Debug] ==========================================`);
+            logger.debug(`[Weather] ==========================================`);
         }
 
         if (windSpeed === undefined || windDir === undefined) {
@@ -994,7 +995,7 @@ export async function fetchWaypointWeather(
             gustData = responseData['gust-surface'] || responseData.gust;
 
             if (enableLogging && waypointName) {
-                console.log(`[VFR Debug] Falling back to surface wind for ${waypointName}:`, {
+                logger.debug(`[Weather] Falling back to surface wind for ${waypointName}:`, {
                     windDataFound: !!windData,
                     windDirDataFound: !!windDirData,
                     windSample: windData?.slice?.(0, 3),
@@ -1025,7 +1026,7 @@ export async function fetchWaypointWeather(
                 cbaseData = meteogramCbase;
                 cbaseSource = 'meteogram';
                 if (enableLogging) {
-                    console.log(`[VFR Debug] Using cbase from MeteogramForecastData for ${waypointName}:`, {
+                    logger.debug(`[Weather] Using cbase from MeteogramForecastData for ${waypointName}:`, {
                         dataLength: cbaseData.length,
                         sample: cbaseData.slice(0, 5),
                         allKeys: Object.keys(meteogramData).filter(k => k.includes('cbase') || k.includes('cloud'))
@@ -1040,7 +1041,7 @@ export async function fetchWaypointWeather(
             if (cbaseData) {
                 cbaseSource = 'pointForecast';
                 if (enableLogging) {
-                    console.log(`[VFR Debug] Using cbase from PointForecastData for ${waypointName}:`, {
+                    logger.debug(`[Weather] Using cbase from PointForecastData for ${waypointName}:`, {
                         dataLength: cbaseData?.length,
                         sample: cbaseData?.slice(0, 5)
                     });
@@ -1049,7 +1050,7 @@ export async function fetchWaypointWeather(
         }
 
         if (enableLogging) {
-            console.log(`[VFR Debug] Cbase source for ${waypointName}: ${cbaseSource}`);
+            logger.debug(`[Weather] Cbase source for ${waypointName}: ${cbaseSource}`);
         }
 
         // Get timestamps - use meteogram timestamps if cbase comes from meteogram
@@ -1061,7 +1062,7 @@ export async function fetchWaypointWeather(
             cbaseTimestamps = meteogramData.ts || meteogramData['ts-surface'];
             timestamps = responseData.ts || responseData['ts-surface'] || cbaseTimestamps || [];
             if (enableLogging && cbaseTimestamps) {
-                console.log(`[VFR Debug] Meteogram timestamps for ${waypointName}:`, {
+                logger.debug(`[Weather] Meteogram timestamps for ${waypointName}:`, {
                     count: cbaseTimestamps.length,
                     first: cbaseTimestamps[0] ? new Date(cbaseTimestamps[0]).toISOString() : 'N/A',
                     last: cbaseTimestamps[cbaseTimestamps.length - 1] ? new Date(cbaseTimestamps[cbaseTimestamps.length - 1]).toISOString() : 'N/A'
@@ -1073,7 +1074,7 @@ export async function fetchWaypointWeather(
 
         if (!timestamps || timestamps.length === 0) {
             if (enableLogging) {
-                console.error(`[VFR Planner] No timestamp data for ${waypointName}`);
+                logger.error(`[Weather] No timestamp data for ${waypointName}`);
             }
             return null;
         }
@@ -1160,7 +1161,7 @@ export async function fetchWaypointWeather(
                 cbaseNeedsInterp = meteogramInterp.needsInterpolation;
 
                 if (enableLogging) {
-                    console.log(`[VFR Debug] Meteogram cbase interpolation for ${waypointName}:`, {
+                    logger.debug(`[Weather] Meteogram cbase interpolation for ${waypointName}:`, {
                         lowerIdx: cbaseLowerIdx,
                         upperIdx: cbaseUpperIdx,
                         fraction: cbaseFraction.toFixed(2),
@@ -1187,9 +1188,7 @@ export async function fetchWaypointWeather(
                 cbaseValue = CLEAR_SKY_METERS; // Clear sky
             }
 
-            if (enableLogging) {
-                console.log(`[VFR Cbase Debug] ${waypointName || 'unknown'}: source=${cbaseSource}, timestamp=${new Date(effectiveTimestamp).toISOString()}, lowerIndex=${cbaseLowerIdx}, upperIndex=${cbaseUpperIdx}, fraction=${cbaseFraction.toFixed(2)}, cbaseLower=${cbaseLower}m (${cbaseLower ? Math.round(metersToFeet(cbaseLower)) : 'CLR'}ft), cbaseUpper=${cbaseUpper}m (${cbaseUpper ? Math.round(metersToFeet(cbaseUpper)) : 'CLR'}ft), final=${cbaseValue}m (${cbaseValue ? Math.round(metersToFeet(cbaseValue)) : 'CLR'}ft)`);
-            }
+            logger.debug(`[Weather] Cbase ${waypointName || 'unknown'}: source=${cbaseSource}, timestamp=${new Date(effectiveTimestamp).toISOString()}, lowerIndex=${cbaseLowerIdx}, upperIndex=${cbaseUpperIdx}, fraction=${cbaseFraction.toFixed(2)}, cbaseLower=${cbaseLower}m (${cbaseLower ? Math.round(metersToFeet(cbaseLower)) : 'CLR'}ft), cbaseUpper=${cbaseUpper}m (${cbaseUpper ? Math.round(metersToFeet(cbaseUpper)) : 'CLR'}ft), final=${cbaseValue}m (${cbaseValue ? Math.round(metersToFeet(cbaseValue)) : 'CLR'}ft)`);
 
             if (cbaseValue !== null && cbaseValue !== undefined && !isNaN(cbaseValue) && cbaseValue > 0) {
                 cloudBase = cbaseValue;
@@ -1265,7 +1264,7 @@ export async function fetchWaypointWeather(
         };
 
         if (enableLogging && waypointName) {
-            console.log(`[VFR Planner] Fetched weather for ${waypointName} at ${usedPressureLevel}:`, {
+            logger.debug(`[Weather] Fetched weather for ${waypointName} at ${usedPressureLevel}:`, {
                 windSpeed: `${Math.round(weather.windSpeed)} kt`,
                 windDir: `${Math.round(weather.windDir)}°`,
                 windAltitude: weather.windAltitude ? `${weather.windAltitude} ft MSL` : 'surface',
@@ -1276,7 +1275,7 @@ export async function fetchWaypointWeather(
 
         return weather;
     } catch (error) {
-        console.error('Failed to fetch weather for waypoint:', error);
+        logger.error('Failed to fetch weather for waypoint:', error);
         return null;
     }
 }
@@ -1320,7 +1319,7 @@ export async function fetchFlightPlanWeather(
             const timeoutPromise = new Promise<null>((resolve) => {
                 setTimeout(() => {
                     if (enableLogging) {
-                        console.warn(`[VFR] Weather fetch timeout for waypoint ${wp.name} (${wp.id})`);
+                        logger.warn(`[Weather] Weather fetch timeout for waypoint ${wp.name} (${wp.id})`);
                     }
                     resolve(null);
                 }, 15000); // Reduced to 15 seconds
@@ -1334,7 +1333,7 @@ export async function fetchFlightPlanWeather(
         } catch (error) {
             // Individual waypoint errors shouldn't stop the entire operation
             if (enableLogging) {
-                console.error(`[VFR] Error fetching weather for waypoint ${wp.name} (${wp.id}):`, error);
+                logger.error(`[Weather] Error fetching weather for waypoint ${wp.name} (${wp.id}):`, error);
             }
             // Continue with other waypoints even if one fails
         }
@@ -1502,7 +1501,7 @@ export async function fetchFullForecast(
         const pointForecastData = response.data?.data;
         if (!pointForecastData) {
             if (enableLogging) {
-                console.error(`[VFR Forecast] No point forecast data for ${lat},${lon}`);
+                logger.error(`[Weather] No point forecast data for ${lat},${lon}`);
             }
             return null;
         }
@@ -1510,7 +1509,7 @@ export async function fetchFullForecast(
         const timestamps = pointForecastData.ts || pointForecastData['ts-surface'] || [];
         if (timestamps.length === 0) {
             if (enableLogging) {
-                console.error(`[VFR Forecast] No timestamps in forecast data for ${lat},${lon}`);
+                logger.error(`[Weather] No timestamps in forecast data for ${lat},${lon}`);
             }
             return null;
         }
@@ -1528,12 +1527,12 @@ export async function fetchFullForecast(
             }
         } catch (meteogramError) {
             if (enableLogging) {
-                console.warn(`[VFR Forecast] Meteogram fetch failed for ${lat},${lon}:`, meteogramError);
+                logger.warn(`[Weather] Meteogram fetch failed for ${lat},${lon}:`, meteogramError);
             }
         }
 
         if (enableLogging) {
-            console.log(`[VFR Forecast] Fetched full forecast for ${lat.toFixed(4)},${lon.toFixed(4)}: ${timestamps.length} timestamps, ${verticalWinds.length} wind levels`);
+            logger.debug(`[Weather] Fetched full forecast for ${lat.toFixed(4)},${lon.toFixed(4)}: ${timestamps.length} timestamps, ${verticalWinds.length} wind levels`);
         }
 
         return {
@@ -1549,7 +1548,7 @@ export async function fetchFullForecast(
         };
     } catch (error) {
         if (enableLogging) {
-            console.error(`[VFR Forecast] Error fetching forecast for ${lat},${lon}:`, error);
+            logger.error(`[Weather] Error fetching forecast for ${lat},${lon}:`, error);
         }
         return null;
     }
@@ -1758,7 +1757,7 @@ export function extractWeatherAtTimestamp(
         };
     } catch (error) {
         if (enableLogging) {
-            console.error(`[VFR Forecast] Error extracting weather at ${targetTimestamp} for ${waypointName}:`, error);
+            logger.error(`[Weather] Error extracting weather at ${targetTimestamp} for ${waypointName}:`, error);
         }
         return null;
     }
@@ -1788,7 +1787,7 @@ export async function getCbaseTable(
 
         if (!data.cbase || !Array.isArray(data.cbase) || data.cbase.length === 0) {
             if (enableLogging) {
-                console.log('[VFR] cbase table:', {
+                logger.debug('[Weather] cbase table:', {
                     waypoint: waypointName || 'Unknown',
                     message: 'Not available for this location',
                 });
@@ -1808,7 +1807,7 @@ export async function getCbaseTable(
         });
 
         if (enableLogging) {
-            console.log('[VFR] Full cbase table:', {
+            logger.debug('[Weather] Full cbase table:', {
                 waypoint: waypointName || 'Unknown',
                 location: { lat, lon },
                 product,
@@ -1819,7 +1818,7 @@ export async function getCbaseTable(
 
         return cbaseTable;
     } catch (error) {
-        console.error('Failed to get cbase table:', error);
+        logger.error('Failed to get cbase table:', error);
         return null;
     }
 }

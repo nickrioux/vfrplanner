@@ -13,6 +13,7 @@ import {
     getFallbackMeta,
     isAvailable as isFallbackAvailable,
 } from './airportFallbackService';
+import { logger } from './logger';
 
 /**
  * Unified airport search result
@@ -162,7 +163,7 @@ export function createAirportProvider(apiKey?: string): IAirportProvider {
     }
 
     if (!isFallbackAvailable()) {
-        console.warn('[Airport Provider] Fallback data not available');
+        logger.warn('Fallback data not available');
     }
 
     return new FallbackProvider();

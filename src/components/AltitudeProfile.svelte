@@ -6,6 +6,7 @@
     import { calculateProfileData, type ProfileDataPoint, type SegmentCondition } from '../services/profileService';
     import type { ElevationPoint } from '../services/elevationService';
     import { lerpAngle } from '../utils/interpolation';
+    import { logger } from '../services/logger';
 
     export let flightPlan: FlightPlan;
     export let weatherData: Map<string, WaypointWeather>;
@@ -396,12 +397,12 @@
         const currentMaxAltitude = maxAltitude;
 
         if (profileData.length === 0) {
-            if (settings.enableLogging) console.log('[Profile] No profile data for terrain');
+            logger.debug('No profile data for terrain');
             return '';
         }
         const terrainPoints = profileData.filter(p => p.terrainElevation !== undefined);
         if (terrainPoints.length === 0) {
-            if (settings.enableLogging) console.log('[Profile] No terrain elevation data in profile points');
+            logger.debug('No terrain elevation data in profile points');
             return '';
         }
 
@@ -421,11 +422,9 @@
         points.push(`${distanceToX(terrainPoints[terrainPoints.length - 1].distance)},${bottomY}`);
 
         const path = points.join(' ');
-        if (settings.enableLogging) {
-            console.log(`[Profile] Terrain path generated: ${terrainPoints.length} points`);
-            console.log(`[Profile] Terrain elevation range: ${Math.min(...terrainPoints.map(p => p.terrainElevation!))}ft to ${Math.max(...terrainPoints.map(p => p.terrainElevation!))}ft`);
-            console.log(`[Profile] First 3 terrain points:`, terrainPoints.slice(0, 3).map(p => `${p.distance.toFixed(1)}NM @ ${p.terrainElevation!.toFixed(0)}ft`));
-        }
+        logger.debug(`Terrain path generated: ${terrainPoints.length} points`);
+        logger.debug(`Terrain elevation range: ${Math.min(...terrainPoints.map(p => p.terrainElevation!))}ft to ${Math.max(...terrainPoints.map(p => p.terrainElevation!))}ft`);
+        logger.debug(`First 3 terrain points:`, terrainPoints.slice(0, 3).map(p => `${p.distance.toFixed(1)}NM @ ${p.terrainElevation!.toFixed(0)}ft`));
         return path;
     })();
 </script>

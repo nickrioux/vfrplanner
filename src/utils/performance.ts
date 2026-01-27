@@ -3,6 +3,8 @@
  * Provides instrumentation for measuring and tracking performance metrics
  */
 
+import { logger } from '../services/logger';
+
 /**
  * Performance metric entry
  */
@@ -133,8 +135,8 @@ class PerformanceMonitor {
             this.config.logSlowOperations &&
             metric.duration > this.config.slowThreshold
         ) {
-            console.warn(
-                `[Performance] Slow operation: ${metric.name} took ${metric.duration.toFixed(2)}ms`,
+            logger.warn(
+                `Slow operation: ${metric.name} took ${metric.duration.toFixed(2)}ms`,
                 metric.metadata
             );
         }

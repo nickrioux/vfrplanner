@@ -14,6 +14,7 @@ import type {
     RetryConfig,
 } from './types';
 import { DEFAULT_RETRY_CONFIG, DEFAULT_TIMEOUT } from './types';
+import { logger } from '../services/logger';
 
 /**
  * Abstract HTTP API adapter with common functionality
@@ -138,7 +139,7 @@ export abstract class HttpApiAdapter implements IApiAdapter {
 
         // Log request if enabled
         if (this.config.enableLogging) {
-            console.log(`[${this.getName()}] ${method} ${url}`);
+            logger.debug(`[${this.getName()}] ${method} ${url}`);
         }
 
         // Execute with retry logic
@@ -157,11 +158,9 @@ export abstract class HttpApiAdapter implements IApiAdapter {
                 }
 
                 // Log response if enabled
-                if (this.config.enableLogging) {
-                    console.log(
-                        `[${this.getName()}] ${processedResponse.status} (${duration}ms)`
-                    );
-                }
+                logger.debug(
+                    `[${this.getName()}] ${processedResponse.status} (${duration}ms)`
+                );
 
                 // Handle response
                 if (processedResponse.ok) {
@@ -184,11 +183,9 @@ export abstract class HttpApiAdapter implements IApiAdapter {
                 ) {
                     lastError = error;
                     const delay = this.calculateRetryDelay(attempt);
-                    if (this.config.enableLogging) {
-                        console.log(
-                            `[${this.getName()}] Retry ${attempt}/${maxAttempts} after ${delay}ms`
-                        );
-                    }
+                    logger.debug(
+                        `[${this.getName()}] Retry ${attempt}/${maxAttempts} after ${delay}ms`
+                    );
                     await this.sleep(delay);
                     continue;
                 }
@@ -207,11 +204,9 @@ export abstract class HttpApiAdapter implements IApiAdapter {
                 if (attempt < maxAttempts && error.retryable) {
                     lastError = error;
                     const delay = this.calculateRetryDelay(attempt);
-                    if (this.config.enableLogging) {
-                        console.log(
-                            `[${this.getName()}] Network error, retry ${attempt}/${maxAttempts} after ${delay}ms`
-                        );
-                    }
+                    logger.debug(
+                        `[${this.getName()}] Network error, retry ${attempt}/${maxAttempts} after ${delay}ms`
+                    );
                     await this.sleep(delay);
                     continue;
                 }

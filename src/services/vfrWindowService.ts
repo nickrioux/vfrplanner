@@ -18,6 +18,7 @@ import type {
 } from '../types/vfrWindow';
 import { metersToFeet } from '../utils/units';
 import { filterToDaylightHours } from '../utils/sunCalc';
+import { logger } from './logger';
 
 /**
  * Weather cache to avoid redundant API calls during search
@@ -97,7 +98,7 @@ class ForecastCache {
             })
             .catch((error) => {
                 if (enableLogging) {
-                    console.error(`[VFR Window] Error fetching forecast for ${lat},${lon}:`, error);
+                    logger.error(`[VFR Window] Error fetching forecast for ${lat},${lon}:`, error);
                 }
                 this.cache.set(key, null);
                 this.pendingFetches.delete(key);
@@ -127,7 +128,7 @@ class ForecastCache {
         }
 
         if (enableLogging) {
-            console.log(`[VFR Window] Prefetching forecasts for ${uniqueLocations.size} unique locations (${waypoints.length} waypoints)`);
+            logger.debug(`[VFR Window] Prefetching forecasts for ${uniqueLocations.size} unique locations (${waypoints.length} waypoints)`);
         }
 
         // Fetch all unique locations in parallel
@@ -138,7 +139,7 @@ class ForecastCache {
         await Promise.all(fetchPromises);
 
         if (enableLogging) {
-            console.log(`[VFR Window] Prefetch complete: ${this.cache.size} forecasts cached`);
+            logger.debug(`[VFR Window] Prefetch complete: ${this.cache.size} forecasts cached`);
         }
     }
 
@@ -312,7 +313,7 @@ async function fetchWeatherParallel(
             })
             .catch((error) => {
                 if (enableLogging) {
-                    console.error(`[VFR Window] Error fetching weather for ${wp.name}:`, error);
+                    logger.error(`[VFR Window] Error fetching weather for ${wp.name}:`, error);
                 }
                 cache.set(wp.lat, wp.lon, arrivalTime, null);
                 results[index] = null;
@@ -618,7 +619,7 @@ async function coarseScanForWindows(
     }
 
     if (enableLogging) {
-        console.log(`[VFR Window] Scanning: ${timestamps.length} timestamps from ${new Date(searchStart).toISOString()} to ${new Date(forecastRange.end).toISOString()}`);
+        logger.debug(`[VFR Window] Scanning: ${timestamps.length} timestamps from ${new Date(searchStart).toISOString()} to ${new Date(forecastRange.end).toISOString()}`);
     }
 
     // Evaluate each timestamp with concurrency control
@@ -656,7 +657,7 @@ async function coarseScanForWindows(
         if (enableLogging) {
             const results = evaluations.slice(-batch.length);
             for (const result of results) {
-                console.log(`[VFR Window] Eval ${new Date(result.departureTime).toISOString()}: ${result.isAcceptable ? '✓' : '✗'} ${result.worstCondition}${result.limitingWaypoint ? ` (${result.limitingWaypoint}: ${result.limitingReasons?.join(', ')})` : ''}`);
+                logger.debug(`[VFR Window] Eval ${new Date(result.departureTime).toISOString()}: ${result.isAcceptable ? '✓' : '✗'} ${result.worstCondition}${result.limitingWaypoint ? ` (${result.limitingWaypoint}: ${result.limitingReasons?.join(', ')})` : ''}`);
             }
         }
     }
@@ -667,7 +668,7 @@ async function coarseScanForWindows(
     // Log summary of acceptable vs unacceptable
     if (enableLogging) {
         const acceptable = evaluations.filter(e => e.isAcceptable).length;
-        console.log(`[VFR Window] Scan complete: ${acceptable}/${evaluations.length} timestamps acceptable`);
+        logger.debug(`[VFR Window] Scan complete: ${acceptable}/${evaluations.length} timestamps acceptable`);
     }
 
     // Find contiguous acceptable periods
@@ -704,9 +705,9 @@ async function coarseScanForWindows(
     }
 
     if (enableLogging) {
-        console.log(`[VFR Window] Coarse scan found ${candidateRanges.length} candidate ranges`);
+        logger.debug(`[VFR Window] Coarse scan found ${candidateRanges.length} candidate ranges`);
         candidateRanges.forEach((r, i) => {
-            console.log(`[VFR Window]   Range ${i + 1}: ${new Date(r.start).toISOString()} to ${new Date(r.end).toISOString()}`);
+            logger.debug(`[VFR Window]   Range ${i + 1}: ${new Date(r.start).toISOString()} to ${new Date(r.end).toISOString()}`);
         });
     }
 
@@ -821,10 +822,10 @@ export async function findVFRWindows(
     }
 
     if (enableLogging) {
-        console.log(`[VFR Window] Starting search: ${waypoints.length} waypoints, ${flightDuration} min flight, minimum=${minimumCondition}`);
-        console.log(`[VFR Window] Forecast range: ${new Date(forecastRange.start).toISOString()} to ${new Date(forecastRange.end).toISOString()}`);
+        logger.debug(`[VFR Window] Starting search: ${waypoints.length} waypoints, ${flightDuration} min flight, minimum=${minimumCondition}`);
+        logger.debug(`[VFR Window] Forecast range: ${new Date(forecastRange.start).toISOString()} to ${new Date(forecastRange.end).toISOString()}`);
         if (startFrom) {
-            console.log(`[VFR Window] Starting from: ${new Date(actualSearchStart).toISOString()}`);
+            logger.debug(`[VFR Window] Starting from: ${new Date(actualSearchStart).toISOString()}`);
         }
     }
 
@@ -833,7 +834,7 @@ export async function findVFRWindows(
     // Reduces API calls from (waypoints × timestamps) to just (unique locations)
     onProgress?.(0.02);
     if (enableLogging) {
-        console.log(`[VFR Window] Prefetching forecasts for all waypoints...`);
+        logger.debug(`[VFR Window] Prefetching forecasts for all waypoints...`);
     }
     await forecastCache.prefetchLocations(waypoints, defaultAltitude, enableLogging);
     onProgress?.(0.05);
@@ -928,10 +929,10 @@ export async function findVFRWindows(
             });
 
             if (enableLogging) {
-                console.log(`[VFR Window] Found window: ${new Date(refinedStart).toISOString()} to ${new Date(refinedEnd).toISOString()} (${Math.round(durationMinutes)} min, ${confidence} confidence)`);
+                logger.debug(`[VFR Window] Found window: ${new Date(refinedStart).toISOString()} to ${new Date(refinedEnd).toISOString()} (${Math.round(durationMinutes)} min, ${confidence} confidence)`);
             }
         } else if (enableLogging) {
-            console.log(`[VFR Window] Skipping window (too short): ${Math.round(durationMinutes)} min < ${flightDuration} min required`);
+            logger.debug(`[VFR Window] Skipping window (too short): ${Math.round(durationMinutes)} min < ${flightDuration} min required`);
         }
     }
 
@@ -939,7 +940,7 @@ export async function findVFRWindows(
 
     // Clean up caches
     if (enableLogging) {
-        console.log(`[VFR Window] Search complete. Weather cache: ${cache.size} entries, Forecast cache: ${forecastCache.size} locations, Windows found: ${windows.length}`);
+        logger.debug(`[VFR Window] Search complete. Weather cache: ${cache.size} entries, Forecast cache: ${forecastCache.size} locations, Windows found: ${windows.length}`);
     }
     cache.clear();
     forecastCache.clear();
@@ -952,7 +953,7 @@ export async function findVFRWindows(
         const lon = routeCoordinates?.lon ?? waypoints[0].lon;
 
         if (enableLogging) {
-            console.log(`[VFR Window] Filtering to daylight hours at ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
+            logger.debug(`[VFR Window] Filtering to daylight hours at ${lat.toFixed(4)}, ${lon.toFixed(4)}`);
         }
 
         filteredWindows = [];
@@ -974,10 +975,10 @@ export async function findVFRWindows(
                     });
 
                     if (enableLogging) {
-                        console.log(`[VFR Window] Daylight window: ${new Date(range.start).toISOString()} to ${new Date(range.end).toISOString()} (${Math.round(durationMinutes)} min)`);
+                        logger.debug(`[VFR Window] Daylight window: ${new Date(range.start).toISOString()} to ${new Date(range.end).toISOString()} (${Math.round(durationMinutes)} min)`);
                     }
                 } else if (enableLogging) {
-                    console.log(`[VFR Window] Skipping daylight window (too short): ${Math.round(durationMinutes)} min < ${flightDuration} min required`);
+                    logger.debug(`[VFR Window] Skipping daylight window (too short): ${Math.round(durationMinutes)} min < ${flightDuration} min required`);
                 }
             }
         }
@@ -986,7 +987,7 @@ export async function findVFRWindows(
         filteredWindows = filteredWindows.slice(0, maxWindows);
 
         if (enableLogging) {
-            console.log(`[VFR Window] After daylight filter: ${filteredWindows.length} windows (was ${windows.length})`);
+            logger.debug(`[VFR Window] After daylight filter: ${filteredWindows.length} windows (was ${windows.length})`);
         }
     }
 

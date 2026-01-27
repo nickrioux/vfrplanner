@@ -5,6 +5,7 @@
 
 import { metersToFeet, msToKnots } from '../utils/units';
 import { MS_PER_MINUTE } from '../utils/constants';
+import { logger } from './logger';
 
 /** Default clear sky value in meters (29999 ft = ~9144 m) */
 export const CLEAR_SKY_METERS = 9144;
@@ -232,7 +233,7 @@ export function createWeatherTimeout<T>(
     return new Promise((resolve) => {
         setTimeout(() => {
             if (enableLogging && waypointName) {
-                console.warn(`[VFR] Weather fetch timeout for waypoint ${waypointName}`);
+                logger.warn(`Weather fetch timeout for waypoint ${waypointName}`);
             }
             resolve(null);
         }, timeoutMs);

@@ -4,6 +4,7 @@
  */
 
 import type { Waypoint } from '../types/flightPlan';
+import { logger } from './logger';
 
 export interface ElevationPoint {
     lat: number;
@@ -151,10 +152,10 @@ export async function fetchElevations(
         const url = `https://api.open-meteo.com/v1/elevation?latitude=${latitudes}&longitude=${longitudes}`;
 
         if (enableLogging) {
-            console.log(`[VFR Planner] Fetching elevations for ${points.length} points from Open-Meteo...`);
-            console.log(`[VFR Planner] API URL: ${url}`);
+            logger.debug(`[Elevation] Fetching elevations for ${points.length} points from Open-Meteo...`);
+            logger.debug(`[Elevation] API URL: ${url}`);
             // Log first 5 points being queried
-            console.log('[VFR Planner] First 5 points queried:',
+            logger.debug('[Elevation] First 5 points queried:',
                 points.slice(0, 5).map((p, i) =>
                     `[${i}] (${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}) @ ${p.distance.toFixed(1)}NM`
                 )
@@ -170,7 +171,7 @@ export async function fetchElevations(
         const data = await response.json();
 
         if (enableLogging) {
-            console.log('[VFR Planner] Open-Meteo API response:', data);
+            logger.debug('[Elevation] Open-Meteo API response:', data);
         }
 
         if (!data.elevation || !Array.isArray(data.elevation)) {
@@ -187,26 +188,26 @@ export async function fetchElevations(
         }));
 
         if (enableLogging) {
-            console.log(`[VFR Planner] Received ${elevationPoints.length} elevation points`);
-            console.log(`[VFR Planner] Elevation range: ${Math.min(...data.elevation)}m to ${Math.max(...data.elevation)}m`);
+            logger.debug(`[Elevation] Received ${elevationPoints.length} elevation points`);
+            logger.debug(`[Elevation] Elevation range: ${Math.min(...data.elevation)}m to ${Math.max(...data.elevation)}m`);
             // Log first 5 points with full details for debugging
-            console.log('[VFR Planner] First 5 elevation points received:');
+            logger.debug('[Elevation] First 5 elevation points received:');
             elevationPoints.slice(0, 5).forEach((p, i) => {
                 const wpMarker = p.waypointIndex !== undefined ? ` [WP ${p.waypointIndex}]` : '';
-                console.log(`  [${i}]${wpMarker} (${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}): ${p.elevation}m = ${(p.elevation * 3.28084).toFixed(1)}ft @ ${p.distance.toFixed(1)}NM`);
+                logger.debug(`  [${i}]${wpMarker} (${p.lat.toFixed(6)}, ${p.lon.toFixed(6)}): ${p.elevation}m = ${(p.elevation * 3.28084).toFixed(1)}ft @ ${p.distance.toFixed(1)}NM`);
             });
             // Log all waypoint elevations specifically
             const waypointElevations = elevationPoints.filter(p => p.waypointIndex !== undefined);
-            console.log(`[VFR Planner] Waypoint elevations (${waypointElevations.length} waypoints):`);
+            logger.debug(`[Elevation] Waypoint elevations (${waypointElevations.length} waypoints):`);
             waypointElevations.forEach(p => {
-                console.log(`  WP ${p.waypointIndex}: ${p.elevation}m = ${(p.elevation * 3.28084).toFixed(1)}ft MSL`);
+                logger.debug(`  WP ${p.waypointIndex}: ${p.elevation}m = ${(p.elevation * 3.28084).toFixed(1)}ft MSL`);
             });
         }
 
         return elevationPoints;
 
     } catch (error) {
-        console.error('[VFR Planner] Error fetching elevations:', error);
+        logger.error('[Elevation] Error fetching elevations:', error);
         return [];
     }
 }
@@ -276,7 +277,7 @@ export async function fetchPointElevation(
         const url = `https://api.open-meteo.com/v1/elevation?latitude=${lat.toFixed(6)}&longitude=${lon.toFixed(6)}`;
 
         if (enableLogging) {
-            console.log(`[VFR Planner] Fetching elevation for point (${lat.toFixed(6)}, ${lon.toFixed(6)})`);
+            logger.debug(`[Elevation] Fetching elevation for point (${lat.toFixed(6)}, ${lon.toFixed(6)})`);
         }
 
         const response = await fetch(url);
@@ -295,12 +296,12 @@ export async function fetchPointElevation(
         const elevationFeet = Math.round(data.elevation[0] * 3.28084);
 
         if (enableLogging) {
-            console.log(`[VFR Planner] Elevation at point: ${data.elevation[0]}m = ${elevationFeet}ft MSL`);
+            logger.debug(`[Elevation] Elevation at point: ${data.elevation[0]}m = ${elevationFeet}ft MSL`);
         }
 
         return elevationFeet;
     } catch (error) {
-        console.error('[VFR Planner] Error fetching point elevation:', error);
+        logger.error('[Elevation] Error fetching point elevation:', error);
         return undefined;
     }
 }
@@ -319,15 +320,15 @@ export async function fetchRouteElevationProfile(
 ): Promise<ElevationPoint[]> {
     if (waypoints.length < 2) {
         if (enableLogging) {
-            console.log('[VFR Planner] Not enough waypoints for elevation profile');
+            logger.debug('[Elevation] Not enough waypoints for elevation profile');
         }
         return [];
     }
 
     if (enableLogging) {
-        console.log('[VFR Planner] Original waypoint coordinates:');
+        logger.debug('[Elevation] Original waypoint coordinates:');
         waypoints.forEach((wp, i) => {
-            console.log(`  [${i}] ${wp.name}: (${wp.lat.toFixed(6)}, ${wp.lon.toFixed(6)}), FPL elevation: ${wp.elevation ? wp.elevation + 'm' : 'N/A'}`);
+            logger.debug(`  [${i}] ${wp.name}: (${wp.lat.toFixed(6)}, ${wp.lon.toFixed(6)}), FPL elevation: ${wp.elevation ? wp.elevation + 'm' : 'N/A'}`);
         });
     }
 
@@ -335,7 +336,7 @@ export async function fetchRouteElevationProfile(
     const sampledPoints = sampleRoutePoints(waypoints, sampleIntervalNM);
 
     if (enableLogging) {
-        console.log(`[VFR Planner] Sampled ${sampledPoints.length} points along ${waypoints.length} waypoint route`);
+        logger.debug(`[Elevation] Sampled ${sampledPoints.length} points along ${waypoints.length} waypoint route`);
     }
 
     // Fetch elevations for all sampled points in one API call

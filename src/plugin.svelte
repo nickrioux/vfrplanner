@@ -415,7 +415,7 @@
                                     {#if (index === 0 || index === flightPlan.waypoints.length - 1) && wp.runways && wp.runways.length > 0}
                                         {@const surfaceWind = { speed: wx.surfaceWindSpeed ?? wx.windSpeed, dir: wx.surfaceWindDir ?? wx.windDir }}
                                         {@const bestRwy = getBestRunway(wp.runways, surfaceWind.dir, surfaceWind.speed, wx.windGust)}
-                                        {@const _ = settings.enableLogging && console.log(`[VFR Gust Debug] ${wp.name}: windGust=${wx.windGust}, bestRwy.gustCrosswindKt=${bestRwy?.gustCrosswindKt}, bestRwy.gustHeadwindKt=${bestRwy?.gustHeadwindKt}`)}
+                                        {@const _ = settings.enableLogging && logger.debug(`[Plugin] ${wp.name}: windGust=${wx.windGust}, bestRwy.gustCrosswindKt=${bestRwy?.gustCrosswindKt}, bestRwy.gustHeadwindKt=${bestRwy?.gustHeadwindKt}`)}
                                         {@const gustInfo = wx.windGust ? ` | Gust: ${Math.round(wx.windGust)}kt` : ''}
                                         {@const surfaceWindTooltip = `Surface wind: ${Math.round(surfaceWind.dir)}° @ ${Math.round(surfaceWind.speed)}kt${gustInfo}`}
                                         {#if bestRwy}
@@ -881,7 +881,7 @@
                 if (departureElevation !== undefined) {
                     plan.waypoints[0] = { ...departureWp, altitude: departureElevation };
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] Set departure ${departureWp.name} elevation to ${departureElevation}ft`);
+                        logger.debug(`[Plugin] Set departure ${departureWp.name} elevation to ${departureElevation}ft`);
                     }
                 }
 
@@ -892,7 +892,7 @@
                     if (arrivalElevation !== undefined) {
                         plan.waypoints[plan.waypoints.length - 1] = { ...arrivalWp, altitude: arrivalElevation };
                         if (settings.enableLogging) {
-                            console.log(`[VFR Planner] Set arrival ${arrivalWp.name} elevation to ${arrivalElevation}ft`);
+                            logger.debug(`[Plugin] Set arrival ${arrivalWp.name} elevation to ${arrivalElevation}ft`);
                         }
                     }
                 }
@@ -900,33 +900,33 @@
 
             // Fetch runway data for departure/arrival airports (uses provider - API or fallback)
             if (settings.enableLogging) {
-                console.log(`[VFR Runway Debug] Provider: ${airportProvider.getSourceName()}, waypoints: ${plan.waypoints.length}`);
+                logger.debug(`[Plugin] Provider: ${airportProvider.getSourceName()}, waypoints: ${plan.waypoints.length}`);
             }
             if (plan.waypoints.length >= 1) {
                 // Fetch departure runway data
                 const departureWp = plan.waypoints[0];
                 if (settings.enableLogging) {
-                    console.log(`[VFR Runway Debug] Departure: ${departureWp.name}, type: ${departureWp.type}, hasRunways: ${!!departureWp.runways}`);
+                    logger.debug(`[Plugin] Departure: ${departureWp.name}, type: ${departureWp.type}, hasRunways: ${!!departureWp.runways}`);
                 }
                 if (departureWp.type === 'AIRPORT' && !departureWp.runways) {
                     try {
                         if (settings.enableLogging) {
-                            console.log(`[VFR Runway Debug] Fetching runway data for ${departureWp.name}...`);
+                            logger.debug(`[Plugin] Fetching runway data for ${departureWp.name}...`);
                         }
                         const airportData = await airportProvider.searchByIcao(departureWp.name);
                         if (settings.enableLogging) {
-                            console.log(`[VFR Runway Debug] Provider response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
+                            logger.debug(`[Plugin] Provider response for ${departureWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
                         }
                         if (airportData?.runways && airportData.runways.length > 0) {
                             // Provider already returns runways in the correct format
                             plan.waypoints[0] = { ...plan.waypoints[0], runways: airportData.runways };
                             if (settings.enableLogging) {
-                                console.log(`[VFR Planner] Loaded ${airportData.runways.length} runways for departure ${departureWp.name}`);
+                                logger.debug(`[Plugin] Loaded ${airportData.runways.length} runways for departure ${departureWp.name}`);
                             }
                         }
                     } catch (err) {
                         if (settings.enableLogging) {
-                            console.warn(`[VFR Planner] Could not fetch runway data for ${departureWp.name}:`, err);
+                            logger.warn(`[Plugin] Could not fetch runway data for ${departureWp.name}:`, err);
                         }
                     }
                 }
@@ -935,27 +935,27 @@
                 if (plan.waypoints.length >= 2) {
                     const arrivalWp = plan.waypoints[plan.waypoints.length - 1];
                     if (settings.enableLogging) {
-                        console.log(`[VFR Runway Debug] Arrival: ${arrivalWp.name}, type: ${arrivalWp.type}, hasRunways: ${!!arrivalWp.runways}`);
+                        logger.debug(`[Plugin] Arrival: ${arrivalWp.name}, type: ${arrivalWp.type}, hasRunways: ${!!arrivalWp.runways}`);
                     }
                     if (arrivalWp.type === 'AIRPORT' && !arrivalWp.runways && arrivalWp.name !== plan.waypoints[0].name) {
                         try {
                             if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] Fetching runway data for ${arrivalWp.name}...`);
+                                logger.debug(`[Plugin] Fetching runway data for ${arrivalWp.name}...`);
                             }
                             const airportData = await airportProvider.searchByIcao(arrivalWp.name);
                             if (settings.enableLogging) {
-                                console.log(`[VFR Runway Debug] Provider response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
+                                logger.debug(`[Plugin] Provider response for ${arrivalWp.name}:`, airportData ? `${airportData.runways?.length ?? 0} runways (source: ${airportData.source})` : 'NULL');
                             }
                             if (airportData?.runways && airportData.runways.length > 0) {
                                 // Provider already returns runways in the correct format
                                 plan.waypoints[plan.waypoints.length - 1] = { ...plan.waypoints[plan.waypoints.length - 1], runways: airportData.runways };
                                 if (settings.enableLogging) {
-                                    console.log(`[VFR Planner] Loaded ${airportData.runways.length} runways for arrival ${arrivalWp.name}`);
+                                    logger.debug(`[Plugin] Loaded ${airportData.runways.length} runways for arrival ${arrivalWp.name}`);
                                 }
                             }
                         } catch (err) {
                             if (settings.enableLogging) {
-                                console.warn(`[VFR Planner] Could not fetch runway data for ${arrivalWp.name}:`, err);
+                                logger.warn(`[Plugin] Could not fetch runway data for ${arrivalWp.name}:`, err);
                             }
                         }
                     }
@@ -1077,16 +1077,16 @@
         await tick();
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Inserted waypoint:', newWaypoint.name, 'at', segmentIndex + 1, 'Total waypoints:', flightPlan.waypoints.length);
+            logger.debug('[Plugin] Inserted waypoint:', newWaypoint.name, 'at', segmentIndex + 1, 'Total waypoints:', flightPlan.waypoints.length);
         }
 
         // Use requestAnimationFrame to ensure map updates after browser paint
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
         }
         requestAnimationFrame(() => {
             if (settings.enableLogging) {
-                console.log('[VFR Planner] requestAnimationFrame callback executing');
+                logger.debug('[Plugin] requestAnimationFrame callback executing');
             }
             updateMapLayers();
         });
@@ -1121,16 +1121,16 @@
         await tick();
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Moved waypoint up:', newWaypoints[index - 1].name);
+            logger.debug('[Plugin] Moved waypoint up:', newWaypoints[index - 1].name);
         }
 
         // Use requestAnimationFrame to ensure map updates after browser paint
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
         }
         requestAnimationFrame(() => {
             if (settings.enableLogging) {
-                console.log('[VFR Planner] requestAnimationFrame callback executing');
+                logger.debug('[Plugin] requestAnimationFrame callback executing');
             }
             updateMapLayers();
         });
@@ -1162,16 +1162,16 @@
         await tick();
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Moved waypoint down:', newWaypoints[index + 1].name);
+            logger.debug('[Plugin] Moved waypoint down:', newWaypoints[index + 1].name);
         }
 
         // Use requestAnimationFrame to ensure map updates after browser paint
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Scheduling updateMapLayers via requestAnimationFrame');
+            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
         }
         requestAnimationFrame(() => {
             if (settings.enableLogging) {
-                console.log('[VFR Planner] requestAnimationFrame callback executing');
+                logger.debug('[Plugin] requestAnimationFrame callback executing');
             }
             updateMapLayers();
         });
@@ -1278,7 +1278,7 @@
                 if (terrainElevation !== undefined) {
                     newWaypoints[0] = { ...newDeparture, altitude: terrainElevation };
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] New departure ${newDeparture.name}: ${terrainElevation} ft`);
+                        logger.debug(`[Plugin] New departure ${newDeparture.name}: ${terrainElevation} ft`);
                     }
                 }
             }
@@ -1291,7 +1291,7 @@
                 if (terrainElevation !== undefined) {
                     newWaypoints[newArrivalIndex] = { ...newArrival, altitude: terrainElevation };
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] New arrival ${newArrival.name}: ${terrainElevation} ft`);
+                        logger.debug(`[Plugin] New arrival ${newArrival.name}: ${terrainElevation} ft`);
                     }
                 }
             }
@@ -1474,7 +1474,7 @@
                 }
             }
             if (settings.enableLogging) {
-                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
+                logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
             }
 
             // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
@@ -1489,7 +1489,7 @@
                             : wp
                     );
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                        logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
                 }
             }
@@ -1545,7 +1545,7 @@
                 }
             }
             if (settings.enableLogging) {
-                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
+                logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
             }
 
             // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
@@ -1560,7 +1560,7 @@
                             : wp
                     );
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                        logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
                 }
             }
@@ -1610,7 +1610,7 @@
             // Departure or arrival: use terrain elevation
             altitude = await fetchPointElevation(lat, lon, settings.enableLogging);
             if (settings.enableLogging) {
-                console.log(`[VFR Planner] ${isFirstWaypoint ? 'Departure' : 'Arrival'} waypoint terrain elevation: ${altitude ?? 'N/A'} ft`);
+                logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} waypoint terrain elevation: ${altitude ?? 'N/A'} ft`);
             }
 
             // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
@@ -1625,7 +1625,7 @@
                             : wp
                     );
                     if (settings.enableLogging) {
-                        console.log(`[VFR Planner] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+                        logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
                 }
             }
@@ -1846,13 +1846,13 @@
             weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
 
             if (settings.enableLogging) {
-                console.log(`[VFR Debug] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
+                logger.debug(`[Plugin] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
                 if (weatherData.size > 0) {
-                    console.log(`[VFR Debug] Weather data keys:`, Array.from(weatherData.keys()));
+                    logger.debug(`[Plugin] Weather data keys:`, Array.from(weatherData.keys()));
                     // Log detailed weather for each waypoint
                     weatherData.forEach((wx, waypointId) => {
                         const wp = flightPlan?.waypoints.find(w => w.id === waypointId);
-                        console.log(`[VFR Debug] Weather for ${wp?.name || waypointId}:`, {
+                        logger.debug(`[Plugin] Weather for ${wp?.name || waypointId}:`, {
                             wind: `${Math.round(wx.windDir)}° @ ${Math.round(wx.windSpeed)} kt`,
                             gust: wx.windGust ? `${Math.round(wx.windGust)} kt` : 'none',
                             temp: `${Math.round(wx.temperature)}°C`,
@@ -1882,7 +1882,7 @@
             // Fetch terrain elevation profile along the route
             try {
                 if (settings.enableLogging) {
-                    console.log(`[VFR Planner] Fetching terrain elevation profile from Open-Meteo (sampling every ${settings.terrainSampleInterval} NM)...`);
+                    logger.debug(`[Plugin] Fetching terrain elevation profile from Open-Meteo (sampling every ${settings.terrainSampleInterval} NM)...`);
                 }
                 elevationProfile = await fetchRouteElevationProfile(
                     flightPlan.waypoints,
@@ -1890,10 +1890,10 @@
                     settings.enableLogging
                 );
                 if (settings.enableLogging) {
-                    console.log(`[VFR Planner] Terrain profile: ${elevationProfile.length} elevation points`);
+                    logger.debug(`[Plugin] Terrain profile: ${elevationProfile.length} elevation points`);
                 }
             } catch (elevError) {
-                console.error('[VFR Planner] Error fetching elevation profile:', elevError);
+                logger.error('[Plugin] Error fetching elevation profile:', elevError);
                 elevationProfile = []; // Continue without terrain data
             }
 
@@ -1904,7 +1904,7 @@
             updateMapLayers();
         } catch (err) {
             weatherError = err instanceof Error ? err.message : 'Failed to fetch weather';
-            console.error('[VFR Planner] Error fetching weather:', err);
+            logger.error('[Plugin] Error fetching weather:', err);
             // Ensure weatherData is at least an empty Map on error
             if (!weatherData || weatherData.size === 0) {
                 weatherData = new Map();
@@ -1917,32 +1917,32 @@
     function recalculateWithWind() {
         if (!flightPlan) return;
 
-        console.log('=== FLIGHT TIME CALCULATION WITH WIND ===');
-        console.log(`TAS (True Airspeed): ${settings.defaultAirspeed} kt`);
-        console.log(`Default Cruise Altitude: ${settings.defaultAltitude} ft`);
-        console.log('NOTE: All tracks and wind directions are in TRUE NORTH reference');
-        console.log('');
+        logger.debug('=== FLIGHT TIME CALCULATION WITH WIND ===');
+        logger.debug(`TAS (True Airspeed): ${settings.defaultAirspeed} kt`);
+        logger.debug(`Default Cruise Altitude: ${settings.defaultAltitude} ft`);
+        logger.debug('NOTE: All tracks and wind directions are in TRUE NORTH reference');
+        logger.debug('');
 
         // Debug: Show all wind data for each waypoint
-        console.log('=== WIND DATA BY WAYPOINT ===');
+        logger.debug('=== WIND DATA BY WAYPOINT ===');
         flightPlan.waypoints.forEach((wp, idx) => {
             const wx = weatherData.get(wp.id);
             if (wx) {
-                console.log(`WP${idx} ${wp.name || 'UNNAMED'} (alt: ${wp.altitude || 'N/A'} ft):`);
-                console.log(`  Wind reported: ${wx.windDir?.toFixed(0)}° @ ${wx.windSpeed?.toFixed(0)} kt`);
-                console.log(`  Wind level used: ${wx.windLevel || 'unknown'}`);
-                console.log(`  Wind altitude: ${wx.windAltitude || 'surface'} ft`);
+                logger.debug(`WP${idx} ${wp.name || 'UNNAMED'} (alt: ${wp.altitude || 'N/A'} ft):`);
+                logger.debug(`  Wind reported: ${wx.windDir?.toFixed(0)}° @ ${wx.windSpeed?.toFixed(0)} kt`);
+                logger.debug(`  Wind level used: ${wx.windLevel || 'unknown'}`);
+                logger.debug(`  Wind altitude: ${wx.windAltitude || 'surface'} ft`);
                 if (wx.verticalWinds && wx.verticalWinds.length > 0) {
-                    console.log(`  Vertical wind profile:`);
+                    logger.debug(`  Vertical wind profile:`);
                     wx.verticalWinds.forEach(vw => {
-                        console.log(`    ${vw.level} (${vw.altitudeFeet} ft): ${vw.windDir.toFixed(0)}° @ ${vw.windSpeed.toFixed(0)} kt`);
+                        logger.debug(`    ${vw.level} (${vw.altitudeFeet} ft): ${vw.windDir.toFixed(0)}° @ ${vw.windSpeed.toFixed(0)} kt`);
                     });
                 }
             } else {
-                console.log(`WP${idx} ${wp.name || 'UNNAMED'}: No weather data`);
+                logger.debug(`WP${idx} ${wp.name || 'UNNAMED'}: No weather data`);
             }
         });
-        console.log('');
+        logger.debug('');
 
         // Recalculate ground speed for each leg with wind correction
         const updatedWaypoints = flightPlan.waypoints.map((wp, index) => {
@@ -1973,26 +1973,26 @@
                 const crosswind = wx.windSpeed * Math.sin(windRad - trackRad);
 
                 // Log leg details with full calculation breakdown
-                console.log(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
-                console.log(`  Distance: ${distance.toFixed(1)} NM`);
-                console.log(`  Track (TRUE): ${wp.bearing.toFixed(0)}°`);
-                console.log(`  Wind (TRUE): ${wx.windDir.toFixed(0)}° @ ${wx.windSpeed.toFixed(0)} kt`);
-                console.log(`  --- Ground Speed Calculation ---`);
-                console.log(`    Wind angle relative to track: ${((wx.windDir - wp.bearing + 360) % 360).toFixed(0)}°`);
-                console.log(`    Formula: headwind = windSpeed × cos(windDir - track)`);
-                console.log(`           = ${wx.windSpeed.toFixed(1)} × cos(${wx.windDir.toFixed(0)}° - ${wp.bearing.toFixed(0)}°)`);
-                console.log(`           = ${wx.windSpeed.toFixed(1)} × cos(${(wx.windDir - wp.bearing).toFixed(0)}°)`);
-                console.log(`           = ${wx.windSpeed.toFixed(1)} × ${Math.cos((wx.windDir - wp.bearing) * Math.PI / 180).toFixed(3)}`);
-                console.log(`           = ${headwind.toFixed(1)} kt (${headwind >= 0 ? 'HEADWIND' : 'TAILWIND'})`);
-                console.log(`    Crosswind: ${Math.abs(crosswind).toFixed(1)} kt from ${crosswind >= 0 ? 'RIGHT' : 'LEFT'}`);
-                console.log(`    Ground Speed = TAS - headwind`);
-                console.log(`                 = ${settings.defaultAirspeed} - (${headwind.toFixed(1)})`);
-                console.log(`                 = ${gs.toFixed(1)} kt`);
-                console.log(`  --- ETE Calculation ---`);
-                console.log(`    ETE = Distance / Ground Speed × 60`);
-                console.log(`        = ${distance.toFixed(1)} / ${gs.toFixed(1)} × 60`);
-                console.log(`        = ${ete.toFixed(1)} min (${Math.floor(ete / 60)}h ${Math.round(ete % 60)}m)`);
-                console.log('');
+                logger.debug(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
+                logger.debug(`  Distance: ${distance.toFixed(1)} NM`);
+                logger.debug(`  Track (TRUE): ${wp.bearing.toFixed(0)}°`);
+                logger.debug(`  Wind (TRUE): ${wx.windDir.toFixed(0)}° @ ${wx.windSpeed.toFixed(0)} kt`);
+                logger.debug(`  --- Ground Speed Calculation ---`);
+                logger.debug(`    Wind angle relative to track: ${((wx.windDir - wp.bearing + 360) % 360).toFixed(0)}°`);
+                logger.debug(`    Formula: headwind = windSpeed × cos(windDir - track)`);
+                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × cos(${wx.windDir.toFixed(0)}° - ${wp.bearing.toFixed(0)}°)`);
+                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × cos(${(wx.windDir - wp.bearing).toFixed(0)}°)`);
+                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × ${Math.cos((wx.windDir - wp.bearing) * Math.PI / 180).toFixed(3)}`);
+                logger.debug(`           = ${headwind.toFixed(1)} kt (${headwind >= 0 ? 'HEADWIND' : 'TAILWIND'})`);
+                logger.debug(`    Crosswind: ${Math.abs(crosswind).toFixed(1)} kt from ${crosswind >= 0 ? 'RIGHT' : 'LEFT'}`);
+                logger.debug(`    Ground Speed = TAS - headwind`);
+                logger.debug(`                 = ${settings.defaultAirspeed} - (${headwind.toFixed(1)})`);
+                logger.debug(`                 = ${gs.toFixed(1)} kt`);
+                logger.debug(`  --- ETE Calculation ---`);
+                logger.debug(`    ETE = Distance / Ground Speed × 60`);
+                logger.debug(`        = ${distance.toFixed(1)} / ${gs.toFixed(1)} × 60`);
+                logger.debug(`        = ${ete.toFixed(1)} min (${Math.floor(ete / 60)}h ${Math.round(ete % 60)}m)`);
+                logger.debug('');
 
                 return {
                     ...wp,
@@ -2003,13 +2003,13 @@
                 // Log leg without wind data
                 const distance = wp.distance || 0;
                 const ete = wp.ete || 0;
-                console.log(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
-                console.log(`  Distance: ${distance.toFixed(1)} NM`);
-                console.log(`  Track (TRUE): ${wp.bearing !== undefined ? wp.bearing.toFixed(0) + '°' : 'N/A'}`);
-                console.log(`  Wind: No wind data available`);
-                console.log(`  Ground Speed: ${settings.defaultAirspeed} kt (using TAS, no wind correction)`);
-                console.log(`  ETE: ${ete.toFixed(1)} min`);
-                console.log('');
+                logger.debug(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
+                logger.debug(`  Distance: ${distance.toFixed(1)} NM`);
+                logger.debug(`  Track (TRUE): ${wp.bearing !== undefined ? wp.bearing.toFixed(0) + '°' : 'N/A'}`);
+                logger.debug(`  Wind: No wind data available`);
+                logger.debug(`  Ground Speed: ${settings.defaultAirspeed} kt (using TAS, no wind correction)`);
+                logger.debug(`  ETE: ${ete.toFixed(1)} min`);
+                logger.debug('');
             }
 
             return wp;
@@ -2032,14 +2032,14 @@
         const averageHeadwind = totalDistance > 0 ? weightedHeadwindSum / totalDistance : undefined;
 
         // Log summary
-        console.log('=== FLIGHT SUMMARY ===');
-        console.log(`Total Distance: ${totalDistance.toFixed(1)} NM`);
-        console.log(`Total ETE: ${totalEte.toFixed(1)} min (${Math.floor(totalEte / 60)}h ${Math.round(totalEte % 60)}m)`);
+        logger.debug('=== FLIGHT SUMMARY ===');
+        logger.debug(`Total Distance: ${totalDistance.toFixed(1)} NM`);
+        logger.debug(`Total ETE: ${totalEte.toFixed(1)} min (${Math.floor(totalEte / 60)}h ${Math.round(totalEte % 60)}m)`);
         if (averageHeadwind !== undefined) {
-            console.log(`Average Headwind: ${averageHeadwind >= 0 ? '+' : ''}${averageHeadwind.toFixed(1)} kt`);
+            logger.debug(`Average Headwind: ${averageHeadwind >= 0 ? '+' : ''}${averageHeadwind.toFixed(1)} kt`);
         }
-        console.log('=====================================');
-        console.log('');
+        logger.debug('=====================================');
+        logger.debug('');
 
         flightPlan = {
             ...flightPlan,
@@ -2260,7 +2260,7 @@
         URL.revokeObjectURL(url);
 
         if (settings.enableLogging) {
-            console.log(`[VFR Planner] CSV exported with ${byDepartureTime.size} departure times, ${waypointNames.length} waypoints`);
+            logger.debug(`[Plugin] CSV exported with ${byDepartureTime.size} departure times, ${waypointNames.length} waypoints`);
         }
     }
 
@@ -2319,10 +2319,10 @@
             }
 
             if (settings.enableLogging) {
-                console.log('[VFR Planner] VFR window search complete:', result);
+                logger.debug('[Plugin] VFR window search complete:', result);
             }
         } catch (err) {
-            console.error('[VFR Planner] Error searching for VFR windows:', err);
+            logger.error('[Plugin] Error searching for VFR windows:', err);
             windowSearchError = err instanceof Error ? err.message : 'Error searching for VFR windows';
         } finally {
             isSearchingWindows = false;
@@ -2356,14 +2356,14 @@
     // Map layer management
     function updateMapLayers() {
         if (settings.enableLogging) {
-            console.log('[VFR Planner] updateMapLayers called, waypoints:', flightPlan?.waypoints.length);
-            console.log('[VFR Planner] routeLayer exists:', !!routeLayer, 'waypointMarkers exists:', !!waypointMarkers);
+            logger.debug('[Plugin] updateMapLayers called, waypoints:', flightPlan?.waypoints.length);
+            logger.debug('[Plugin] routeLayer exists:', !!routeLayer, 'waypointMarkers exists:', !!waypointMarkers);
         }
 
         clearMapLayers();
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] After clearMapLayers: routeLayer:', !!routeLayer, 'waypointMarkers:', !!waypointMarkers);
+            logger.debug('[Plugin] After clearMapLayers: routeLayer:', !!routeLayer, 'waypointMarkers:', !!waypointMarkers);
         }
 
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
@@ -2427,7 +2427,7 @@
         map.addLayer(routeLayer);
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Added routeLayer to map with', flightPlan.waypoints.length - 1, 'segments');
+            logger.debug('[Plugin] Added routeLayer to map with', flightPlan.waypoints.length - 1, 'segments');
         }
 
         // Create waypoint markers
@@ -2623,14 +2623,14 @@
         });
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Created', flightPlan.waypoints.length, 'waypoint markers');
+            logger.debug('[Plugin] Created', flightPlan.waypoints.length, 'waypoint markers');
         }
 
         map.addLayer(waypointMarkers);
 
         if (settings.enableLogging) {
-            console.log('[VFR Planner] Added waypointMarkers layer to map');
-            console.log('[VFR Planner] Map has', map.getLayers ? map.getLayers().length : 'unknown', 'layers');
+            logger.debug('[Plugin] Added waypointMarkers layer to map');
+            logger.debug('[Plugin] Map has', map.getLayers ? map.getLayers().length : 'unknown', 'layers');
         }
     }
 
