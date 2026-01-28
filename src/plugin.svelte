@@ -2262,7 +2262,7 @@
                 // Use regular marker for dragging in edit mode
                 marker = new L.Marker([wp.lat, wp.lon], {
                     draggable: true,
-                    icon: L.divIcon({
+                    icon: new L.DivIcon({
                         className: 'wp-marker',
                         html: `<div style="
                             width: 16px;
@@ -2472,7 +2472,7 @@
     function fitMapToRoute() {
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
 
-        const bounds = L.latLngBounds(
+        const bounds = new L.LatLngBounds(
             flightPlan.waypoints.map(wp => [wp.lat, wp.lon] as [number, number])
         );
 
