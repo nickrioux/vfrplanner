@@ -221,7 +221,7 @@
                     </ul>
 
                     <h4>Max VFR Windows</h4>
-                    <p>Maximum number of VFR windows to find during a search. The search covers up to 10 days of forecast data.</p>
+                    <p>Maximum number of VFR windows to find during a search. The search covers the entire forecast period available from the current Windy weather model.</p>
 
                     <h4>Terrain Sample Interval</h4>
                     <p>Distance between elevation samples along your route. Lower values give more terrain detail but take longer to load. Recommended: 1-3 NM.</p>
