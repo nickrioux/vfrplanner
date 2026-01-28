@@ -10,4 +10,4 @@ node_modules
 dist/*
 src/data/airports-fallback.json
 scripts/.cache/
-
+coverage/
