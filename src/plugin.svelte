@@ -706,6 +706,8 @@
 
             // Set flight plan using store
             routeStore.setFlightPlan(plan);
+            // Wait for reactive updates to propagate before updating map
+            await tick();
             updateMapLayers();
             fitMapToRoute();
             saveSession();
@@ -725,7 +727,7 @@
         saveSession();
     }
 
-    function createNewFlightPlan() {
+    async function createNewFlightPlan() {
         const routeSettings: RouteSettings = {
             defaultAirspeed: settings.defaultAirspeed,
             defaultAltitude: settings.defaultAltitude,
@@ -736,7 +738,8 @@
         error = null;
         resetRoutePanel();
 
-        // Update map
+        // Wait for reactive updates to propagate before updating map
+        await tick();
         updateMapLayers();
         saveSession();
     }
@@ -2224,7 +2227,7 @@
         }
     }
 
-    function loadSession() {
+    async function loadSession() {
         try {
             const sessionData = sessionStorage.load();
             if (!sessionData) return;
@@ -2269,6 +2272,8 @@
                     })),
                 };
                 routeStore.setFlightPlan(restoredPlan);
+                // Wait for reactive updates to propagate before updating map
+                await tick();
                 updateMapLayers();
                 fitMapToRoute();
             }
@@ -2283,7 +2288,7 @@
 
     export const onopen = async (_params: unknown) => {
         // Load session when plugin opens
-        loadSession();
+        await loadSession();
         if (flightPlan) {
             updateMapLayers();
             // Auto-fetch weather if route has waypoints
