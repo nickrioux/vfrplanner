@@ -1651,7 +1651,7 @@
         // Check if ECMWF model is selected - inform user about data sources
         if (!isEcmwfModel()) {
             const modelName = getCurrentModelName();
-            weatherModelWarning = `Surface data from ${modelName}. Ceiling and altitude winds from ECMWF.`;
+            weatherModelWarning = `Using ${modelName} for surface data, ECMWF for ceiling and altitude winds.`;
         }
 
         try {

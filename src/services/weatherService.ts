@@ -223,6 +223,51 @@ function estimateVisibility(humidity: number): number {
 }
 
 /**
+ * Fetch ECMWF point forecast specifically for cbase (ceiling) data
+ * This ensures ceiling data always comes from ECMWF regardless of selected model
+ */
+async function fetchEcmwfCbase(
+    lat: number,
+    lon: number,
+    enableLogging: boolean = false
+): Promise<{ cbaseData: number[]; timestamps: number[] } | null> {
+    try {
+        const response: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
+            'ecmwf' as Products,
+            { lat, lon },
+            {},
+            {}
+        );
+
+        const data = response.data?.data;
+        if (!data) {
+            return null;
+        }
+
+        const cbaseData = data['cbase-surface'] || data.cbase;
+        const timestamps = data.ts || data['ts-surface'];
+
+        if (!cbaseData || !Array.isArray(cbaseData) || cbaseData.length === 0) {
+            if (enableLogging) {
+                logger.debug(`[Weather] No ECMWF cbase data available`);
+            }
+            return null;
+        }
+
+        if (enableLogging) {
+            logger.debug(`[Weather] Fetched ECMWF cbase: ${cbaseData.length} values`);
+        }
+
+        return { cbaseData, timestamps: timestamps || [] };
+    } catch (error) {
+        if (enableLogging) {
+            logger.error(`[Weather] Failed to fetch ECMWF cbase:`, error);
+        }
+        return null;
+    }
+}
+
+/**
  * Fetches vertical wind data for all pressure levels using getMeteogramForecastData with extended: 'true'
  * This is the approach used by the flyxc windy-sounding plugin
  * @param lat - Latitude
@@ -1065,16 +1110,37 @@ export async function fetchWaypointWeather(
             }
         }
 
-        // Fall back to point forecast cbase if meteogram doesn't have it
+        // Fall back to ECMWF point forecast if meteogram doesn't have cbase
+        // This ensures ceiling data always comes from ECMWF regardless of selected model
+        let ecmwfCbaseTimestamps: number[] | undefined;
+
         if (!cbaseData) {
-            cbaseData = responseData['cbase-surface'] || responseData.cbase;
-            if (cbaseData) {
-                cbaseSource = 'pointForecast';
-                if (enableLogging) {
-                    logger.debug(`[Weather] Using cbase from PointForecastData for ${waypointName}:`, {
-                        dataLength: cbaseData?.length,
-                        sample: cbaseData?.slice(0, 5)
-                    });
+            // Check if current model is already ECMWF - if so, use existing response
+            const currentProduct = store.get('product') as Products;
+            if (currentProduct === 'ecmwf' || currentProduct === 'ecmwfWaves' || currentProduct === 'ecmwfAifs') {
+                cbaseData = responseData['cbase-surface'] || responseData.cbase;
+                if (cbaseData) {
+                    cbaseSource = 'pointForecast-ecmwf';
+                    if (enableLogging) {
+                        logger.debug(`[Weather] Using cbase from ECMWF PointForecastData for ${waypointName}:`, {
+                            dataLength: cbaseData?.length,
+                            sample: cbaseData?.slice(0, 5)
+                        });
+                    }
+                }
+            } else {
+                // Fetch ECMWF cbase separately since a different model is selected
+                const ecmwfCbase = await fetchEcmwfCbase(lat, lon, enableLogging);
+                if (ecmwfCbase) {
+                    cbaseData = ecmwfCbase.cbaseData;
+                    ecmwfCbaseTimestamps = ecmwfCbase.timestamps;
+                    cbaseSource = 'ecmwf-separate';
+                    if (enableLogging) {
+                        logger.debug(`[Weather] Using cbase from separate ECMWF fetch for ${waypointName}:`, {
+                            dataLength: cbaseData.length,
+                            sample: cbaseData.slice(0, 5)
+                        });
+                    }
                 }
             }
         }
@@ -1091,6 +1157,10 @@ export async function fetchWaypointWeather(
             // Meteogram has its own timestamps
             cbaseTimestamps = meteogramData.ts || meteogramData['ts-surface'];
             timestamps = responseData.ts || responseData['ts-surface'] || cbaseTimestamps || [];
+        } else if (cbaseSource === 'ecmwf-separate' && ecmwfCbaseTimestamps) {
+            // Use ECMWF timestamps for cbase interpolation
+            cbaseTimestamps = ecmwfCbaseTimestamps;
+            timestamps = responseData.ts || responseData['ts-surface'] || [];
             if (enableLogging && cbaseTimestamps) {
                 logger.debug(`[Weather] Meteogram timestamps for ${waypointName}:`, {
                     count: cbaseTimestamps.length,
