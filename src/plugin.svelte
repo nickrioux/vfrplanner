@@ -167,6 +167,15 @@
                         {/if}
                     </div>
                 </div>
+                <div class="weather-options">
+                    <label class="checkbox-label" title="When enabled, weather at each waypoint is forecast for your estimated arrival time. When disabled, all waypoints show weather for departure time.">
+                        <input
+                            type="checkbox"
+                            bind:checked={adjustForecastForFlightTime}
+                        />
+                        Adjust forecast for flight time
+                    </label>
+                </div>
             </div>
         {/if}
 
@@ -555,6 +564,7 @@
     let weatherAlerts: Map<string, WeatherAlert[]> = new Map();
     let isLoadingWeather = false;
     let weatherError: string | null = null;
+    let adjustForecastForFlightTime: boolean = true; // When true, forecast time adjusts for ETA at each waypoint
 
     // Elevation profile state
     let elevationProfile: ElevationPoint[] = [];
@@ -1645,17 +1655,18 @@
                 }
             }
 
-            // Fetch weather for all waypoints at their estimated arrival times
+            // Fetch weather for all waypoints
             // Use the planned altitude for wind data
             const plannedAltitude = flightPlan.aircraft.defaultAltitude;
-            
+
             // Add overall timeout to prevent infinite hanging (60 seconds total)
             const weatherFetchPromise = fetchFlightPlanWeather(
                 flightPlan.waypoints,
                 name,
                 departureTime,
                 plannedAltitude,
-                settings.enableLogging
+                settings.enableLogging,
+                adjustForecastForFlightTime
             );
 
             const overallTimeout = new Promise<Map<string, WaypointWeather>>((_, reject) => {
@@ -2495,6 +2506,7 @@
                 settings,
                 departureTime,
                 syncWithWindy,
+                adjustForecastForFlightTime,
                 activeTab,
                 maxProfileAltitude,
                 profileScale,
@@ -2525,6 +2537,9 @@
             }
             if (typeof data.syncWithWindy === 'boolean') {
                 syncWithWindy = data.syncWithWindy;
+            }
+            if (typeof data.adjustForecastForFlightTime === 'boolean') {
+                adjustForecastForFlightTime = data.adjustForecastForFlightTime;
             }
             if (data.activeTab) {
                 activeTab = data.activeTab;
@@ -3237,6 +3252,30 @@
 
         &.action-row-center {
             justify-content: center;
+        }
+    }
+
+    .weather-options {
+        display: flex;
+        align-items: center;
+        padding: 4px 0;
+        font-size: 11px;
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            color: rgba(255, 255, 255, 0.7);
+
+            input[type="checkbox"] {
+                margin: 0;
+                cursor: pointer;
+            }
+
+            &:hover {
+                color: rgba(255, 255, 255, 0.9);
+            }
         }
     }
 

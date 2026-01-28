@@ -1286,17 +1286,20 @@ export async function fetchWaypointWeather(
  * @param pluginName - Plugin name for API calls
  * @param departureTime - Optional departure timestamp (ms). If provided, weather is fetched for estimated arrival time at each waypoint
  * @param altitude - Altitude in feet MSL for wind data (optional, defaults to surface)
+ * @param enableLogging - Enable debug logging
+ * @param useProgressiveTime - When true, adjusts forecast time for each waypoint based on ETE. When false, uses departure time for all waypoints.
  */
 export async function fetchFlightPlanWeather(
     waypoints: Waypoint[],
     pluginName: string,
     departureTime?: number,
     altitude?: number,
-    enableLogging: boolean = false
+    enableLogging: boolean = false,
+    useProgressiveTime: boolean = true
 ): Promise<Map<string, WaypointWeather>> {
     const weatherMap = new Map<string, WaypointWeather>();
 
-    // Calculate cumulative ETE to get arrival time at each waypoint
+    // Calculate cumulative ETE to get arrival time at each waypoint (only if progressive time is enabled)
     let cumulativeEteMinutes = 0;
 
     // Fetch weather for all waypoints in parallel with individual error handling
@@ -1306,12 +1309,19 @@ export async function fetchFlightPlanWeather(
             let targetTime: number | undefined;
 
             if (departureTime) {
-                // Add cumulative ETE to departure time
-                targetTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
+                if (useProgressiveTime) {
+                    // Add cumulative ETE to departure time for arrival-time forecast
+                    targetTime = departureTime + (cumulativeEteMinutes * 60 * 1000);
+                } else {
+                    // Use same departure time for all waypoints (snapshot mode)
+                    targetTime = departureTime;
+                }
             }
 
-            // Add this waypoint's ETE to cumulative for next waypoint
-            cumulativeEteMinutes += wp.ete || 0;
+            // Add this waypoint's ETE to cumulative for next waypoint (only matters if progressive)
+            if (useProgressiveTime) {
+                cumulativeEteMinutes += wp.ete || 0;
+            }
 
             // Add timeout to prevent hanging (15 seconds per waypoint)
             const weatherPromise = fetchWaypointWeather(wp.lat, wp.lon, pluginName, targetTime, wp.name, altitude, enableLogging);
