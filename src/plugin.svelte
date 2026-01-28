@@ -363,7 +363,7 @@
                 {selectedWaypointId}
                 {editingWaypointId}
                 {editingWaypointAltitudeId}
-                ceilingDataReliable={!weatherModelWarning}
+                ceilingDataReliable={true}
                 on:selectWaypoint={(e) => selectWaypoint(e.detail)}
                 on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
                 on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
@@ -1648,10 +1648,10 @@
         weatherError = null;
         weatherModelWarning = null;
 
-        // Check if ECMWF model is selected - warn if not
+        // Check if ECMWF model is selected - inform user about data sources
         if (!isEcmwfModel()) {
             const modelName = getCurrentModelName();
-            weatherModelWarning = `${modelName} model selected. For ceiling data and altitude winds, switch to ECMWF.`;
+            weatherModelWarning = `Surface data from ${modelName}. Ceiling and altitude winds from ECMWF.`;
         }
 
         try {

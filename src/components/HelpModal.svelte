@@ -118,13 +118,13 @@
                         <li>Low cloud ceilings that may conflict with planned altitude</li>
                     </ul>
 
-                    <h4>Weather Model Requirements</h4>
-                    <p>For best results, select <strong>ECMWF</strong> in Windy's model picker:</p>
+                    <h4>Weather Data Sources</h4>
+                    <p>The plugin uses data from multiple sources:</p>
                     <ul>
-                        <li><strong>ECMWF (recommended):</strong> Full data including altitude-specific winds and cloud ceiling</li>
-                        <li><strong>Other models (GFS, ICON, etc.):</strong> Surface wind and temperature available, but ceiling data may be unavailable</li>
+                        <li><strong>Surface data</strong> (surface wind, temperature, humidity): Uses the model selected in Windy's picker (GFS, ICON, ECMWF, etc.)</li>
+                        <li><strong>Altitude winds and ceiling:</strong> Always fetched from ECMWF for accuracy, regardless of selected model</li>
                     </ul>
-                    <p>If a non-ECMWF model is selected, a warning will appear and ceiling values will show "N/A".</p>
+                    <p>If a non-ECMWF model is selected, a notice will indicate which data comes from which source.</p>
                     <p><strong>Note:</strong> Visibility is estimated from humidity data, not directly from the weather model.</p>
                 </section>
 
