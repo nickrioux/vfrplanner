@@ -320,6 +320,204 @@ function createRouteStore() {
          * Reset to initial state
          */
         reset: () => set(initialState),
+
+        /**
+         * Create a new empty flight plan
+         */
+        createNew: (settings: RouteSettings) => {
+            const now = new Date();
+            const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+            const newPlan: FlightPlan = {
+                id: `plan-${Date.now()}`,
+                name: `New Plan - ${dateStr} ${timeStr}`,
+                waypoints: [],
+                aircraft: {
+                    airspeed: settings.defaultAirspeed,
+                    defaultAltitude: settings.defaultAltitude,
+                },
+                totals: {
+                    distance: 0,
+                    ete: 0,
+                },
+                sourceFormat: 'manual',
+            };
+
+            update(state => ({
+                ...state,
+                flightPlan: newPlan,
+                selectedWaypointId: null,
+                editingWaypointId: null,
+                isEditMode: true, // Enable edit mode for new plans
+                error: null,
+            }));
+
+            return newPlan;
+        },
+
+        /**
+         * Reverse the waypoint order
+         */
+        reverseRoute: () => {
+            update(state => {
+                if (!state.flightPlan || state.flightPlan.waypoints.length < 2) return state;
+
+                const reversedWaypoints = [...state.flightPlan.waypoints].reverse();
+
+                // Update flight plan name if it follows the pattern "A to B"
+                let newName = state.flightPlan.name;
+                const nameMatch = state.flightPlan.name.match(/^(.+?)\s+to\s+(.+)$/i);
+                if (nameMatch) {
+                    newName = `${nameMatch[2]} to ${nameMatch[1]}`;
+                } else if (reversedWaypoints.length >= 2) {
+                    const first = reversedWaypoints[0].name;
+                    const last = reversedWaypoints[reversedWaypoints.length - 1].name;
+                    newName = `${first} to ${last}`;
+                }
+
+                // Recalculate navigation
+                const { waypoints: updatedWaypoints, totals } = calculateFlightPlanNavigation(
+                    reversedWaypoints,
+                    state.flightPlan.aircraft.airspeed
+                );
+
+                return {
+                    ...state,
+                    flightPlan: {
+                        ...state.flightPlan,
+                        name: newName,
+                        waypoints: updatedWaypoints,
+                        totals,
+                    },
+                    selectedWaypointId: null,
+                };
+            });
+        },
+
+        /**
+         * Move a waypoint up in the order (toward index 0)
+         */
+        moveWaypointUp: (waypointId: string) => {
+            update(state => {
+                if (!state.flightPlan) return state;
+
+                const index = state.flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
+                if (index <= 0) return state; // Already at top or not found
+
+                const waypoints = [...state.flightPlan.waypoints];
+                const temp = waypoints[index - 1];
+                waypoints[index - 1] = waypoints[index];
+                waypoints[index] = temp;
+
+                // Recalculate navigation
+                const { waypoints: updatedWaypoints, totals } = calculateFlightPlanNavigation(
+                    waypoints,
+                    state.flightPlan.aircraft.airspeed
+                );
+
+                return {
+                    ...state,
+                    flightPlan: {
+                        ...state.flightPlan,
+                        waypoints: updatedWaypoints,
+                        totals,
+                    },
+                };
+            });
+        },
+
+        /**
+         * Move a waypoint down in the order (toward end)
+         */
+        moveWaypointDown: (waypointId: string) => {
+            update(state => {
+                if (!state.flightPlan) return state;
+
+                const index = state.flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
+                if (index < 0 || index >= state.flightPlan.waypoints.length - 1) return state;
+
+                const waypoints = [...state.flightPlan.waypoints];
+                const temp = waypoints[index];
+                waypoints[index] = waypoints[index + 1];
+                waypoints[index + 1] = temp;
+
+                // Recalculate navigation
+                const { waypoints: updatedWaypoints, totals } = calculateFlightPlanNavigation(
+                    waypoints,
+                    state.flightPlan.aircraft.airspeed
+                );
+
+                return {
+                    ...state,
+                    flightPlan: {
+                        ...state.flightPlan,
+                        waypoints: updatedWaypoints,
+                        totals,
+                    },
+                };
+            });
+        },
+
+        /**
+         * Insert a waypoint at a specific segment (after segmentIndex)
+         */
+        insertWaypointAtSegment: (segmentIndex: number, waypoint: Waypoint) => {
+            update(state => {
+                if (!state.flightPlan) return state;
+
+                const waypoints = [
+                    ...state.flightPlan.waypoints.slice(0, segmentIndex + 1),
+                    waypoint,
+                    ...state.flightPlan.waypoints.slice(segmentIndex + 1)
+                ];
+
+                // Recalculate navigation
+                const { waypoints: updatedWaypoints, totals } = calculateFlightPlanNavigation(
+                    waypoints,
+                    state.flightPlan.aircraft.airspeed
+                );
+
+                return {
+                    ...state,
+                    flightPlan: {
+                        ...state.flightPlan,
+                        waypoints: updatedWaypoints,
+                        totals,
+                    },
+                    selectedWaypointId: waypoint.id,
+                };
+            });
+        },
+
+        /**
+         * Update multiple waypoints at once (for bulk operations like weather updates)
+         */
+        updateWaypoints: (updates: Map<string, Partial<Waypoint>>) => {
+            update(state => {
+                if (!state.flightPlan) return state;
+
+                const waypoints = state.flightPlan.waypoints.map(wp => {
+                    const waypointUpdates = updates.get(wp.id);
+                    return waypointUpdates ? { ...wp, ...waypointUpdates } : wp;
+                });
+
+                // Recalculate navigation
+                const { waypoints: updatedWaypoints, totals } = calculateFlightPlanNavigation(
+                    waypoints,
+                    state.flightPlan.aircraft.airspeed
+                );
+
+                return {
+                    ...state,
+                    flightPlan: {
+                        ...state.flightPlan,
+                        waypoints: updatedWaypoints,
+                        totals,
+                    },
+                };
+            });
+        },
     };
 }
 

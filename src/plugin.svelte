@@ -420,6 +420,7 @@
     import AboutTab from './components/AboutTab.svelte';
     import DepartureSlider from './components/DepartureSlider.svelte';
     import { createSessionStorage } from './services/sessionStorage';
+    import { routeStore, type RouteSettings } from './stores/routeStore';
 
     import type { LatLon } from '@windy/interfaces';
 
@@ -428,10 +429,14 @@
     // Session storage instance
     const sessionStorage = createSessionStorage(name);
 
-    // State
-    let flightPlan: FlightPlan | null = null;
-    let selectedWaypointId: string | null = null;
-    let editingWaypointId: string | null = null;
+    // Route store subscription - provides flightPlan, selectedWaypointId, editingWaypointId, isEditMode
+    $: flightPlan = $routeStore.flightPlan;
+    $: selectedWaypointId = $routeStore.selectedWaypointId;
+    $: editingWaypointId = $routeStore.editingWaypointId;
+    $: isEditMode = $routeStore.isEditMode;
+    $: routeError = $routeStore.error;
+
+    // UI-only state (not managed by store)
     let editingWaypointAltitudeId: string | null = null;
     let editingPlanName: boolean = false;
     let isLoading = false;
@@ -451,10 +456,6 @@
     let searchError: string | null = null;
     let showSearchPanel = false;
     let showExportMenu = false;
-
-    // Edit mode state (transient, not persisted)
-    // When true: markers are draggable, map clicks add waypoints, segment clicks insert waypoints
-    let isEditMode = false;
 
     // Weather state
     let weatherData: Map<string, WaypointWeather> = new Map();
@@ -715,10 +716,8 @@
     }
 
     function clearFlightPlan() {
-        flightPlan = null;
-        selectedWaypointId = null;
+        routeStore.clearFlightPlan();
         error = null;
-        isEditMode = false;
         activeTab = 'route';
         resetRoutePanel();
         clearMapLayers();
@@ -726,33 +725,15 @@
     }
 
     function createNewFlightPlan() {
-        // Generate a name based on current date/time
-        const now = new Date();
-        const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-        flightPlan = {
-            id: `plan-${Date.now()}`,
-            name: `New Plan - ${dateStr} ${timeStr}`,
-            waypoints: [],
-            aircraft: {
-                airspeed: settings.defaultAirspeed,
-                defaultAltitude: settings.defaultAltitude,
-            },
-            totals: {
-                distance: 0,
-                ete: 0,
-            },
-            sourceFormat: 'manual',
+        const routeSettings: RouteSettings = {
+            defaultAirspeed: settings.defaultAirspeed,
+            defaultAltitude: settings.defaultAltitude,
         };
+        routeStore.createNew(routeSettings);
 
         // Clear any previous state
-        selectedWaypointId = null;
         error = null;
         resetRoutePanel();
-
-        // Enable edit mode immediately for new plans
-        isEditMode = true;
 
         // Update map
         updateMapLayers();
@@ -760,7 +741,7 @@
     }
 
     function selectWaypoint(wp: Waypoint) {
-        selectedWaypointId = wp.id;
+        routeStore.selectWaypoint(wp.id);
         map.panTo([wp.lat, wp.lon]);
     }
 
@@ -787,81 +768,36 @@
             altitude: flightPlan.aircraft.defaultAltitude,
         };
 
-        // Insert the waypoint after the segment's starting waypoint
-        const newWaypoints = [
-            ...flightPlan.waypoints.slice(0, segmentIndex + 1),
-            newWaypoint,
-            ...flightPlan.waypoints.slice(segmentIndex + 1)
-        ];
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
+        // Use store to insert waypoint (handles navigation recalculation and selection)
+        routeStore.insertWaypointAtSegment(segmentIndex, newWaypoint);
 
         // Wait for Svelte's reactivity to complete
         await tick();
 
         if (settings.enableLogging) {
-            logger.debug('[Plugin] Inserted waypoint:', newWaypoint.name, 'at', segmentIndex + 1, 'Total waypoints:', flightPlan.waypoints.length);
+            logger.debug('[Plugin] Inserted waypoint:', newWaypoint.name, 'at', segmentIndex + 1);
         }
 
-        // Use requestAnimationFrame to ensure map updates after browser paint
-        if (settings.enableLogging) {
-            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
-        }
         requestAnimationFrame(() => {
-            if (settings.enableLogging) {
-                logger.debug('[Plugin] requestAnimationFrame callback executing');
-            }
             updateMapLayers();
         });
 
         saveSession();
-
-        // Select the newly inserted waypoint
-        selectedWaypointId = newWaypoint.id;
     }
 
     async function moveWaypointUp(waypointId: string) {
         if (!flightPlan) return;
 
-        const index = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
-        if (index <= 0) return; // Already at top or not found
-
-        const newWaypoints = [...flightPlan.waypoints];
-        const temp = newWaypoints[index - 1];
-        newWaypoints[index - 1] = newWaypoints[index];
-        newWaypoints[index] = temp;
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
+        routeStore.moveWaypointUp(waypointId);
 
         // Wait for Svelte's reactivity to complete
         await tick();
 
         if (settings.enableLogging) {
-            logger.debug('[Plugin] Moved waypoint up:', newWaypoints[index - 1].name);
+            logger.debug('[Plugin] Moved waypoint up');
         }
 
-        // Use requestAnimationFrame to ensure map updates after browser paint
-        if (settings.enableLogging) {
-            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
-        }
         requestAnimationFrame(() => {
-            if (settings.enableLogging) {
-                logger.debug('[Plugin] requestAnimationFrame callback executing');
-            }
             updateMapLayers();
         });
 
@@ -871,38 +807,16 @@
     async function moveWaypointDown(waypointId: string) {
         if (!flightPlan) return;
 
-        const index = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
-        if (index < 0 || index >= flightPlan.waypoints.length - 1) return; // Already at bottom or not found
-
-        const newWaypoints = [...flightPlan.waypoints];
-        const temp = newWaypoints[index];
-        newWaypoints[index] = newWaypoints[index + 1];
-        newWaypoints[index + 1] = temp;
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, flightPlan.aircraft.airspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
+        routeStore.moveWaypointDown(waypointId);
 
         // Wait for Svelte's reactivity to complete
         await tick();
 
         if (settings.enableLogging) {
-            logger.debug('[Plugin] Moved waypoint down:', newWaypoints[index + 1].name);
+            logger.debug('[Plugin] Moved waypoint down');
         }
 
-        // Use requestAnimationFrame to ensure map updates after browser paint
-        if (settings.enableLogging) {
-            logger.debug('[Plugin] Scheduling updateMapLayers via requestAnimationFrame');
-        }
         requestAnimationFrame(() => {
-            if (settings.enableLogging) {
-                logger.debug('[Plugin] requestAnimationFrame callback executing');
-            }
             updateMapLayers();
         });
 
@@ -910,7 +824,7 @@
     }
 
     function startEditWaypointName(waypointId: string) {
-        editingWaypointId = waypointId;
+        routeStore.setEditingWaypoint(waypointId);
     }
 
     function finishEditWaypointName(waypointId: string, newName: string) {
@@ -918,18 +832,12 @@
 
         const trimmedName = newName.trim();
         if (trimmedName === '') {
-            editingWaypointId = null;
+            routeStore.setEditingWaypoint(null);
             return;
         }
 
-        flightPlan = {
-            ...flightPlan,
-            waypoints: flightPlan.waypoints.map(wp =>
-                wp.id === waypointId ? { ...wp, name: trimmedName } : wp
-            ),
-        };
-
-        editingWaypointId = null;
+        routeStore.updateWaypoint(waypointId, { name: trimmedName });
+        routeStore.setEditingWaypoint(null);
         updateMapLayers();
         saveSession();
     }
@@ -947,11 +855,7 @@
             return;
         }
 
-        flightPlan = {
-            ...flightPlan,
-            name: trimmedName,
-        };
-
+        routeStore.updatePlanName(trimmedName);
         editingPlanName = false;
         saveSession();
     }
@@ -969,12 +873,7 @@
             return;
         }
 
-        flightPlan = {
-            ...flightPlan,
-            waypoints: flightPlan.waypoints.map(wp =>
-                wp.id === waypointId ? { ...wp, altitude } : wp
-            ),
-        };
+        routeStore.updateWaypoint(waypointId, { altitude });
 
         editingWaypointAltitudeId = null;
         updateMapLayers();
@@ -991,53 +890,44 @@
         const deletedIndex = flightPlan.waypoints.findIndex(wp => wp.id === waypointId);
         const wasDeparture = deletedIndex === 0;
         const wasArrival = deletedIndex === flightPlan.waypoints.length - 1;
+        const remainingCount = flightPlan.waypoints.length - 1;
 
-        const newWaypoints = flightPlan.waypoints.filter(wp => wp.id !== waypointId);
-
-        if (newWaypoints.length === 0) {
+        if (remainingCount === 0) {
             clearFlightPlan();
             return;
         }
 
+        // Remove the waypoint using store
+        routeStore.removeWaypoint(waypointId);
+
         // Update altitudes for new departure/arrival if autoTerrainElevation is enabled
-        if (settings.autoTerrainElevation && newWaypoints.length > 0) {
-            // If we deleted the departure, the new first waypoint becomes departure
-            if (wasDeparture && newWaypoints.length > 0) {
-                const newDeparture = newWaypoints[0];
+        if (settings.autoTerrainElevation && remainingCount > 0) {
+            const currentPlan = $routeStore.flightPlan;
+            if (!currentPlan) return;
+
+            // If we deleted the departure, update new first waypoint's altitude
+            if (wasDeparture && currentPlan.waypoints.length > 0) {
+                const newDeparture = currentPlan.waypoints[0];
                 const terrainElevation = await fetchPointElevation(newDeparture.lat, newDeparture.lon, settings.enableLogging);
                 if (terrainElevation !== undefined) {
-                    newWaypoints[0] = { ...newDeparture, altitude: terrainElevation };
+                    routeStore.updateWaypoint(newDeparture.id, { altitude: terrainElevation });
                     if (settings.enableLogging) {
                         logger.debug(`[Plugin] New departure ${newDeparture.name}: ${terrainElevation} ft`);
                     }
                 }
             }
 
-            // If we deleted the arrival, the new last waypoint becomes arrival
-            if (wasArrival && newWaypoints.length > 0) {
-                const newArrivalIndex = newWaypoints.length - 1;
-                const newArrival = newWaypoints[newArrivalIndex];
+            // If we deleted the arrival, update new last waypoint's altitude
+            if (wasArrival && currentPlan.waypoints.length > 0) {
+                const newArrival = currentPlan.waypoints[currentPlan.waypoints.length - 1];
                 const terrainElevation = await fetchPointElevation(newArrival.lat, newArrival.lon, settings.enableLogging);
                 if (terrainElevation !== undefined) {
-                    newWaypoints[newArrivalIndex] = { ...newArrival, altitude: terrainElevation };
+                    routeStore.updateWaypoint(newArrival.id, { altitude: terrainElevation });
                     if (settings.enableLogging) {
                         logger.debug(`[Plugin] New arrival ${newArrival.name}: ${terrainElevation} ft`);
                     }
                 }
             }
-        }
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
-
-        if (selectedWaypointId === waypointId) {
-            selectedWaypointId = null;
         }
 
         updateMapLayers();
@@ -1047,31 +937,18 @@
     function handleWaypointDrag(waypointId: string, newLat: number, newLon: number) {
         if (!flightPlan || !isEditMode) return;
 
-        const newWaypoints = flightPlan.waypoints.map(wp => {
-            if (wp.id === waypointId) {
-                return { ...wp, lat: newLat, lon: newLon };
-            }
-            return wp;
-        });
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(newWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
+        // Update waypoint position using store (handles navigation recalculation)
+        routeStore.updateWaypoint(waypointId, { lat: newLat, lon: newLon });
 
         updateMapLayers();
         saveSession();
     }
 
     function toggleEditMode() {
-        isEditMode = !isEditMode;
+        routeStore.toggleEditMode();
 
-        // Reset cursor when exiting edit mode
-        if (!isEditMode) {
+        // Reset cursor when exiting edit mode (check store state)
+        if (!$routeStore.isEditMode) {
             map.getContainer().style.cursor = '';
         }
 
@@ -1483,38 +1360,13 @@
     function handleReverseRoute() {
         if (!flightPlan || flightPlan.waypoints.length < 2) return;
 
-        // Reverse the waypoints array
-        const reversedWaypoints = [...flightPlan.waypoints].reverse();
-
-        // Update flight plan name if it follows the pattern "A to B"
-        let newName = flightPlan.name;
-        const nameMatch = flightPlan.name.match(/^(.+?)\s+to\s+(.+)$/i);
-        if (nameMatch) {
-            newName = `${nameMatch[2]} to ${nameMatch[1]}`;
-        } else if (flightPlan.waypoints.length >= 2) {
-            // Fallback: use first and last waypoint names
-            const first = reversedWaypoints[0].name;
-            const last = reversedWaypoints[reversedWaypoints.length - 1].name;
-            newName = `${first} to ${last}`;
-        }
-
-        // Recalculate navigation with reversed waypoints
-        const navResult = calculateFlightPlanNavigation(reversedWaypoints, settings.defaultAirspeed);
+        // Use store to reverse route (handles name update and navigation recalculation)
+        routeStore.reverseRoute();
 
         // Clear weather data since arrival times will be incorrect after reversing
         weatherData = new Map();
         weatherAlerts = new Map();
         weatherError = null;
-
-        flightPlan = {
-            ...flightPlan,
-            name: newName,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
-
-        // Clear selected waypoint
-        selectedWaypointId = null;
 
         // Update map layers
         updateMapLayers();
