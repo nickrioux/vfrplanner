@@ -20,6 +20,36 @@ import {
 } from './weatherHelpers';
 import { logger } from './logger';
 
+/**
+ * Check if the current Windy model is ECMWF
+ * ECMWF provides the most complete data including altitude winds and cloud ceiling
+ */
+export function isEcmwfModel(): boolean {
+    const product = store.get('product') as Products;
+    return product === 'ecmwf' || product === 'ecmwfWaves' || product === 'ecmwfAifs';
+}
+
+/**
+ * Get the current weather model name for display
+ */
+export function getCurrentModelName(): string {
+    const product = store.get('product') as Products;
+    const modelNames: Record<string, string> = {
+        'ecmwf': 'ECMWF',
+        'ecmwfWaves': 'ECMWF Waves',
+        'ecmwfAifs': 'ECMWF AIFS',
+        'gfs': 'GFS',
+        'icon': 'ICON',
+        'iconEu': 'ICON-EU',
+        'iconD2': 'ICON-D2',
+        'nam': 'NAM',
+        'namConus': 'NAM CONUS',
+        'namAlaska': 'NAM Alaska',
+        'namHawaii': 'NAM Hawaii',
+    };
+    return modelNames[product] || product?.toUpperCase() || 'Unknown';
+}
+
 /** Wind data at a specific pressure level */
 export interface LevelWind {
     level: string;          // e.g., '850h', '700h'

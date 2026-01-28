@@ -252,6 +252,9 @@
             {#if weatherError}
                 <div class="weather-error">{weatherError}</div>
             {/if}
+            {#if weatherModelWarning}
+                <div class="weather-model-warning">⚠️ {weatherModelWarning}</div>
+            {/if}
 
             <!-- Departure Time Slider -->
             {#if forecastRange}
@@ -360,6 +363,7 @@
                 {selectedWaypointId}
                 {editingWaypointId}
                 {editingWaypointAltitudeId}
+                ceilingDataReliable={!weatherModelWarning}
                 on:selectWaypoint={(e) => selectWaypoint(e.detail)}
                 on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
                 on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
@@ -498,6 +502,8 @@
         formatTemperature,
         getForecastTimeRange,
         getCbaseTable,
+        isEcmwfModel,
+        getCurrentModelName,
         DEFAULT_ALERT_THRESHOLDS,
         type WaypointWeather,
         type WeatherAlert,
@@ -574,6 +580,7 @@
     let weatherAlerts: Map<string, WeatherAlert[]> = new Map();
     let isLoadingWeather = false;
     let weatherError: string | null = null;
+    let weatherModelWarning: string | null = null; // Warning when non-ECMWF model is used
     let adjustForecastForFlightTime: boolean = true; // When true, forecast time adjusts for ETA at each waypoint
 
     // Elevation profile state
@@ -606,6 +613,7 @@
         weatherData = new Map();
         weatherAlerts = new Map();
         weatherError = null;
+        weatherModelWarning = null;
         forecastRange = null;
 
         // Clear VFR window state
@@ -1638,6 +1646,13 @@
 
         isLoadingWeather = true;
         weatherError = null;
+        weatherModelWarning = null;
+
+        // Check if ECMWF model is selected - warn if not
+        if (!isEcmwfModel()) {
+            const modelName = getCurrentModelName();
+            weatherModelWarning = `${modelName} model selected. For ceiling data and altitude winds, switch to ECMWF.`;
+        }
 
         try {
             // Get forecast time range if not already loaded
@@ -3628,6 +3643,15 @@
         background: rgba(231, 76, 60, 0.2);
         border-radius: 4px;
         color: #e74c3c;
+        font-size: 12px;
+    }
+
+    .weather-model-warning {
+        margin: 0 10px 10px;
+        padding: 8px;
+        background: rgba(243, 156, 18, 0.2);
+        border-radius: 4px;
+        color: #f39c12;
         font-size: 12px;
     }
 

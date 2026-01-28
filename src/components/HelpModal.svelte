@@ -117,6 +117,15 @@
                         <li>Low visibility along the route</li>
                         <li>Low cloud ceilings that may conflict with planned altitude</li>
                     </ul>
+
+                    <h4>Weather Model Requirements</h4>
+                    <p>For best results, select <strong>ECMWF</strong> in Windy's model picker:</p>
+                    <ul>
+                        <li><strong>ECMWF (recommended):</strong> Full data including altitude-specific winds and cloud ceiling</li>
+                        <li><strong>Other models (GFS, ICON, etc.):</strong> Surface wind and temperature available, but ceiling data may be unavailable</li>
+                    </ul>
+                    <p>If a non-ECMWF model is selected, a warning will appear and ceiling values will show "N/A".</p>
+                    <p><strong>Note:</strong> Visibility is estimated from humidity data, not directly from the weather model.</p>
                 </section>
 
             {:else if activeTab === 'profile'}

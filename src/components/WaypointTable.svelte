@@ -19,6 +19,7 @@
     export let selectedWaypointId: string | null = null;
     export let editingWaypointId: string | null = null;
     export let editingWaypointAltitudeId: string | null = null;
+    export let ceilingDataReliable: boolean = true; // False when non-ECMWF model is used
 
     const dispatch = createEventDispatcher<{
         selectWaypoint: Waypoint;
@@ -145,14 +146,15 @@
                             <span
                                 class="wx-cloud"
                                 class:clickable={wx.cloudBase !== undefined}
-                                title={wx.cloudBase !== undefined ? 'Click to view full cbase table in console' : 'Cloud base (ECMWF) - N/A'}
+                                class:na={!ceilingDataReliable && wx.cloudBaseDisplay === 'CLR'}
+                                title={wx.cloudBase !== undefined ? 'Click to view full cbase table in console' : (ceilingDataReliable ? 'Clear sky' : 'Ceiling data requires ECMWF model')}
                                 on:click={() => {
                                     if (wx.cloudBase !== undefined && wp) {
                                         handleCbaseClick(wp);
                                     }
                                 }}
                             >
-                                ☁️ {wx.cloudBaseDisplay ?? 'CLR'}
+                                ☁️ {#if !ceilingDataReliable && wx.cloudBaseDisplay === 'CLR'}N/A{:else}{wx.cloudBaseDisplay ?? 'CLR'}{/if}
                             </span>
                         </div>
                         <!-- Best runway info for terminal waypoints -->
@@ -537,6 +539,11 @@
             opacity: 1;
             color: #3498db;
         }
+    }
+
+    .wx-cloud.na {
+        opacity: 0.5;
+        font-style: italic;
     }
 
     .alert-badge {
