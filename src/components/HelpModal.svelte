@@ -188,6 +188,55 @@
                     <h4>Exit Edit Mode</h4>
                     <p>Click "Done" or press <strong>Escape</strong> to exit edit mode.</p>
                 </section>
+
+            {:else if activeTab === 'settings'}
+                <section>
+                    <h3>Settings</h3>
+
+                    <h4>VFR Condition Thresholds</h4>
+                    <p>Choose how strictly to evaluate VFR conditions:</p>
+                    <ul>
+                        <li><strong>Standard VFR:</strong> Typical VFR minimums (ceiling &gt; 3000ft, visibility &gt; 9km)</li>
+                        <li><strong>Conservative:</strong> Higher minimums for extra safety margin</li>
+                        <li><strong>Custom:</strong> Define your own ceiling, visibility, wind, and clearance limits</li>
+                    </ul>
+
+                    <h4>Default Airspeed (TAS)</h4>
+                    <p>True airspeed used for calculating estimated time enroute (ETE) and ground speed when wind data is available. Set this to your typical cruise TAS.</p>
+
+                    <h4>Default Altitude</h4>
+                    <p>Default cruise altitude for new waypoints when creating or importing a flight plan.</p>
+
+                    <h4>Auto Terrain Elevation</h4>
+                    <p>When enabled, automatically fetches terrain elevation for departure and arrival airports. Useful for accurate altitude profile display.</p>
+
+                    <h4>Show Waypoint Labels</h4>
+                    <p>Toggle permanent waypoint name labels on the map. When disabled, labels only appear on hover.</p>
+
+                    <h4>Include Night Hours</h4>
+                    <p>Controls whether VFR window search includes nighttime hours:</p>
+                    <ul>
+                        <li><strong>Enabled:</strong> Search all hours (24/7)</li>
+                        <li><strong>Disabled:</strong> Limit to 30 min before sunrise to 30 min after sunset</li>
+                    </ul>
+
+                    <h4>Max VFR Windows</h4>
+                    <p>Maximum number of VFR windows to find during a search. The search covers up to 10 days of forecast data.</p>
+
+                    <h4>Terrain Sample Interval</h4>
+                    <p>Distance between elevation samples along your route. Lower values give more terrain detail but take longer to load. Recommended: 1-3 NM.</p>
+
+                    <h4>Profile Top Height</h4>
+                    <p>Maximum altitude displayed on the altitude profile graph. Adjust based on your typical cruise altitude.</p>
+
+                    <h4>AirportDB API Key</h4>
+                    <p>Optional API key for enhanced airport data:</p>
+                    <ul>
+                        <li><strong>Without key:</strong> Offline data for large/medium airports in North America and Europe</li>
+                        <li><strong>With key:</strong> Global coverage including small airports and navaids (VOR, NDB)</li>
+                    </ul>
+                    <p>Get a free API key at airportdb.io</p>
+                </section>
             {/if}
         </div>
 
@@ -209,6 +258,7 @@
         { id: 'profile', label: 'Profile', icon: '📊' },
         { id: 'vfr', label: 'VFR Windows', icon: '🕐' },
         { id: 'edit', label: 'Edit Mode', icon: '✏️' },
+        { id: 'settings', label: 'Settings', icon: '⚙️' },
     ];
 
     let activeTab = 'start';
