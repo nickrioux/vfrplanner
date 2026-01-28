@@ -217,11 +217,12 @@ export function formatBearing(degrees: number): string {
 }
 
 /**
- * Format ETE for display
+ * Format ETE for display (rounded to whole minutes)
  */
 export function formatEte(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
-    const mins = Math.round(minutes % 60);
+    const roundedMinutes = Math.round(minutes);
+    const hours = Math.floor(roundedMinutes / 60);
+    const mins = roundedMinutes % 60;
     if (hours > 0) {
         return `${hours}h ${mins.toString().padStart(2, '0')}m`;
     }
