@@ -562,6 +562,14 @@
         error = null;
         isLoading = true;
 
+        // Validate file size (max 10MB)
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;
+        if (file.size > MAX_FILE_SIZE) {
+            error = 'File too large (max 10MB)';
+            isLoading = false;
+            return;
+        }
+
         try {
             let plan: FlightPlan;
 
