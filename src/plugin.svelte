@@ -704,7 +704,8 @@
             // Reset route panel state before loading new plan
             resetRoutePanel();
 
-            flightPlan = plan;
+            // Set flight plan using store
+            routeStore.setFlightPlan(plan);
             updateMapLayers();
             fitMapToRoute();
             saveSession();
@@ -1055,24 +1056,24 @@
             // Create new flight plan if none exists
             createNewFlightPlan();
         }
-        if (!flightPlan) return;
+        const currentPlan = $routeStore.flightPlan;
+        if (!currentPlan) return;
 
         const waypoint = airportToWaypoint(airport);
 
         // Check if already in flight plan
-        if (flightPlan.waypoints.some(wp => wp.name === waypoint.name)) {
+        if (currentPlan.waypoints.some(wp => wp.name === waypoint.name)) {
             searchError = `${waypoint.name} is already in the flight plan`;
             return;
         }
 
-        const isFirstWaypoint = flightPlan.waypoints.length === 0;
-        // New waypoint will be added at the end, so it becomes the new arrival
+        const isFirstWaypoint = currentPlan.waypoints.length === 0;
+        const previousArrivalId = currentPlan.waypoints.length > 1
+            ? currentPlan.waypoints[currentPlan.waypoints.length - 1].id
+            : null;
 
-        // Build new waypoints array with proper altitudes
-        let updatedWaypoints = [...flightPlan.waypoints];
-
+        // Handle terrain elevation for new waypoint
         if (settings.autoTerrainElevation) {
-            // Departure or arrival: use terrain elevation (from airport or fetched)
             if (!waypoint.altitude || waypoint.altitude === 0) {
                 const terrainElevation = await fetchPointElevation(waypoint.lat, waypoint.lon, settings.enableLogging);
                 if (terrainElevation !== undefined) {
@@ -1083,35 +1084,24 @@
             if (settings.enableLogging) {
                 logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
             }
+        }
 
-            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
-            if (updatedWaypoints.length > 1) {
-                const previousArrivalIndex = updatedWaypoints.length - 1;
-                const previousArrival = updatedWaypoints[previousArrivalIndex];
-                // Only change if it had terrain elevation (not manually set high altitude)
-                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
-                        idx === previousArrivalIndex
-                            ? { ...wp, altitude: settings.defaultAltitude }
-                            : wp
-                    );
+        // Add new waypoint using store
+        routeStore.addWaypoint(waypoint);
+
+        // Update previous arrival to cruising altitude if needed
+        if (settings.autoTerrainElevation && previousArrivalId) {
+            const updatedPlan = $routeStore.flightPlan;
+            if (updatedPlan) {
+                const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
+                if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
                     if (settings.enableLogging) {
                         logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
                 }
             }
         }
-
-        // Add new waypoint
-        updatedWaypoints = [...updatedWaypoints, waypoint];
-
-        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
 
         updateMapLayers();
         saveSession();
@@ -1126,24 +1116,24 @@
         if (!flightPlan) {
             createNewFlightPlan();
         }
-        if (!flightPlan) return;
+        const currentPlan = $routeStore.flightPlan;
+        if (!currentPlan) return;
 
         const waypoint = navaidToWaypoint(navaid);
 
         // Check if already in flight plan
-        if (flightPlan.waypoints.some(wp => wp.name === waypoint.name)) {
+        if (currentPlan.waypoints.some(wp => wp.name === waypoint.name)) {
             searchError = `${waypoint.name} is already in the flight plan`;
             return;
         }
 
-        const isFirstWaypoint = flightPlan.waypoints.length === 0;
-        // New waypoint will be added at the end, so it becomes the new arrival
+        const isFirstWaypoint = currentPlan.waypoints.length === 0;
+        const previousArrivalId = currentPlan.waypoints.length > 1
+            ? currentPlan.waypoints[currentPlan.waypoints.length - 1].id
+            : null;
 
-        // Build new waypoints array with proper altitudes
-        let updatedWaypoints = [...flightPlan.waypoints];
-
+        // Handle terrain elevation for new waypoint
         if (settings.autoTerrainElevation) {
-            // Departure or arrival: use terrain elevation (from navaid or fetched)
             if (!waypoint.altitude || waypoint.altitude === 0) {
                 const terrainElevation = await fetchPointElevation(waypoint.lat, waypoint.lon, settings.enableLogging);
                 if (terrainElevation !== undefined) {
@@ -1154,35 +1144,24 @@
             if (settings.enableLogging) {
                 logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
             }
+        }
 
-            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
-            if (updatedWaypoints.length > 1) {
-                const previousArrivalIndex = updatedWaypoints.length - 1;
-                const previousArrival = updatedWaypoints[previousArrivalIndex];
-                // Only change if it had terrain elevation (not manually set high altitude)
-                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
-                        idx === previousArrivalIndex
-                            ? { ...wp, altitude: settings.defaultAltitude }
-                            : wp
-                    );
+        // Add new waypoint using store
+        routeStore.addWaypoint(waypoint);
+
+        // Update previous arrival to cruising altitude if needed
+        if (settings.autoTerrainElevation && previousArrivalId) {
+            const updatedPlan = $routeStore.flightPlan;
+            if (updatedPlan) {
+                const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
+                if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
                     if (settings.enableLogging) {
                         logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
                 }
             }
         }
-
-        // Add new waypoint
-        updatedWaypoints = [...updatedWaypoints, waypoint];
-
-        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
 
         updateMapLayers();
         saveSession();
@@ -1206,31 +1185,43 @@
         if (!isEditMode || !flightPlan) return;
 
         const { lat, lon } = latLon;
-        const isFirstWaypoint = flightPlan.waypoints.length === 0;
+        const currentPlan = $routeStore.flightPlan;
+        if (!currentPlan) return;
 
-        // Build new waypoints array with proper altitudes
-        let updatedWaypoints = [...flightPlan.waypoints];
+        const isFirstWaypoint = currentPlan.waypoints.length === 0;
+        const previousArrivalId = currentPlan.waypoints.length > 1
+            ? currentPlan.waypoints[currentPlan.waypoints.length - 1].id
+            : null;
 
         // Fetch terrain elevation for departure or arrival waypoints (if setting enabled)
         let altitude: number | undefined;
         if (settings.autoTerrainElevation) {
-            // Departure or arrival: use terrain elevation
             altitude = await fetchPointElevation(lat, lon, settings.enableLogging);
             if (settings.enableLogging) {
                 logger.debug(`[Plugin] ${isFirstWaypoint ? 'Departure' : 'Arrival'} waypoint terrain elevation: ${altitude ?? 'N/A'} ft`);
             }
+        }
 
-            // If there was a previous arrival (now becomes middle waypoint), set it to cruising altitude
-            if (updatedWaypoints.length > 1) {
-                const previousArrivalIndex = updatedWaypoints.length - 1;
-                const previousArrival = updatedWaypoints[previousArrivalIndex];
-                // Only change if it had terrain elevation (not manually set high altitude)
-                if (previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                    updatedWaypoints = updatedWaypoints.map((wp, idx) =>
-                        idx === previousArrivalIndex
-                            ? { ...wp, altitude: settings.defaultAltitude }
-                            : wp
-                    );
+        // Create new waypoint with terrain elevation for departure/arrival
+        const newWaypoint: Waypoint = {
+            id: `wp-${Date.now()}`,
+            name: `WPT${currentPlan.waypoints.length + 1}`,
+            type: 'USER WAYPOINT',
+            lat,
+            lon,
+            altitude: altitude,
+        };
+
+        // Add new waypoint using store
+        routeStore.addWaypoint(newWaypoint);
+
+        // Update previous arrival to cruising altitude if needed
+        if (settings.autoTerrainElevation && previousArrivalId) {
+            const updatedPlan = $routeStore.flightPlan;
+            if (updatedPlan) {
+                const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
+                if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+                    routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
                     if (settings.enableLogging) {
                         logger.debug(`[Plugin] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
                     }
@@ -1238,66 +1229,39 @@
             }
         }
 
-        // Create new waypoint with terrain elevation for departure/arrival
-        const newWaypoint: Waypoint = {
-            id: `wp-${Date.now()}`,
-            name: `WPT${flightPlan.waypoints.length + 1}`,
-            type: 'USER WAYPOINT',
-            lat,
-            lon,
-            altitude: altitude, // terrain elevation for departure/arrival
-        };
-
-        // Add new waypoint
-        updatedWaypoints = [...updatedWaypoints, newWaypoint];
-
-        // Recalculate navigation
-        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
-
         // Stay in edit mode after adding waypoint
         updateMapLayers();
         saveSession();
     }
 
     function handleSettingsChange() {
-        if (!flightPlan) return;
+        const currentPlan = $routeStore.flightPlan;
+        if (!currentPlan) return;
 
         // Track old default altitude to update enroute waypoints
-        const oldDefaultAltitude = flightPlan.aircraft.defaultAltitude;
+        const oldDefaultAltitude = currentPlan.aircraft.defaultAltitude;
         const newDefaultAltitude = settings.defaultAltitude;
 
-        // Update aircraft settings
-        flightPlan.aircraft.airspeed = settings.defaultAirspeed;
-        flightPlan.aircraft.defaultAltitude = newDefaultAltitude;
+        // Update aircraft settings using store
+        routeStore.updateAircraft({
+            airspeed: settings.defaultAirspeed,
+            defaultAltitude: newDefaultAltitude,
+        });
 
         // Update enroute waypoints that were using the old default altitude
         // Enroute = not first (departure) or last (arrival) waypoint
-        let updatedWaypoints = flightPlan.waypoints;
-        if (oldDefaultAltitude !== newDefaultAltitude && flightPlan.waypoints.length > 2) {
-            updatedWaypoints = flightPlan.waypoints.map((wp, index) => {
-                const isEnroute = index > 0 && index < flightPlan.waypoints.length - 1;
-                // Update enroute waypoints that have the old default altitude
+        if (oldDefaultAltitude !== newDefaultAltitude && currentPlan.waypoints.length > 2) {
+            const updates = new Map<string, Partial<Waypoint>>();
+            currentPlan.waypoints.forEach((wp, index) => {
+                const isEnroute = index > 0 && index < currentPlan.waypoints.length - 1;
                 if (isEnroute && wp.altitude === oldDefaultAltitude) {
-                    return { ...wp, altitude: newDefaultAltitude };
+                    updates.set(wp.id, { altitude: newDefaultAltitude });
                 }
-                return wp;
             });
+            if (updates.size > 0) {
+                routeStore.updateWaypoints(updates);
+            }
         }
-
-        // Recalculate navigation with new airspeed
-        const navResult = calculateFlightPlanNavigation(updatedWaypoints, settings.defaultAirspeed);
-
-        flightPlan = {
-            ...flightPlan,
-            waypoints: navResult.waypoints,
-            totals: navResult.totals,
-        };
 
         updateMapLayers();
         saveSession();
@@ -1631,15 +1595,31 @@
         logger.debug('=====================================');
         logger.debug('');
 
-        flightPlan = {
-            ...flightPlan,
-            waypoints: updatedWaypoints,
-            totals: {
-                ...flightPlan.totals,
-                ete: totalEte,
-                averageHeadwind,
-            },
-        };
+        // Build updates map for bulk waypoint update
+        const updates = new Map<string, Partial<Waypoint>>();
+        updatedWaypoints.forEach((wp, index) => {
+            if (index > 0 && wp.groundSpeed !== undefined) {
+                updates.set(wp.id, { groundSpeed: wp.groundSpeed, ete: wp.ete });
+            }
+        });
+
+        // Update waypoints using store if there are changes
+        if (updates.size > 0) {
+            routeStore.updateWaypoints(updates);
+        }
+
+        // Update totals - need to get fresh plan after waypoint updates
+        const currentPlan = $routeStore.flightPlan;
+        if (currentPlan) {
+            routeStore.setFlightPlan({
+                ...currentPlan,
+                totals: {
+                    ...currentPlan.totals,
+                    ete: totalEte,
+                    averageHeadwind,
+                },
+            });
+        }
     }
 
     function getWaypointWeather(waypointId: string): WaypointWeather | undefined {
@@ -2288,7 +2268,7 @@
                         eta: wp.eta ? new Date(wp.eta) : undefined,
                     })),
                 };
-                flightPlan = restoredPlan;
+                routeStore.setFlightPlan(restoredPlan);
                 updateMapLayers();
                 fitMapToRoute();
             }
