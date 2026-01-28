@@ -997,7 +997,7 @@ export async function findVFRWindows(
         if (!includeNightFlights && windows.length > 0) {
             limitedBy = 'All VFR windows are outside daylight hours';
         } else {
-            limitedBy = `All candidate windows shorter than ${flightDuration} min flight duration`;
+            limitedBy = `All candidate windows shorter than ${Math.round(flightDuration)} min flight duration`;
         }
     } else if (filteredWindows.length >= maxWindows) {
         limitedBy = `Limited to first ${maxWindows} windows`;
