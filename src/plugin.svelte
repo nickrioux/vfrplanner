@@ -8,11 +8,14 @@
     class:mobile={isMobile}
 >
     <!-- Panel mode title -->
-    <div
-        class="plugin__title plugin__title--chevron-back"
-        on:click={() => bcast.emit('rqstOpen', 'menu')}
-    >
-        {title}
+    <div class="plugin__title-row">
+        <div
+            class="plugin__title plugin__title--chevron-back"
+            on:click={() => bcast.emit('rqstOpen', 'menu')}
+        >
+            {title}
+        </div>
+        <button class="btn-help" on:click={() => showHelpModal = true} title="Help">?</button>
     </div>
 
     <!-- Main content -->
@@ -468,6 +471,11 @@
         on:save={handleConditionsSave}
         on:cancel={handleConditionsCancel}
     />
+
+    <!-- Help Modal -->
+    {#if showHelpModal}
+        <HelpModal on:close={() => showHelpModal = false} />
+    {/if}
 </section>
 
 <script lang="ts">
@@ -523,6 +531,7 @@
     import SettingsPanel from './components/SettingsPanel.svelte';
     import ConditionsModal from './components/ConditionsModal.svelte';
     import WaypointTable from './components/WaypointTable.svelte';
+    import HelpModal from './components/HelpModal.svelte';
     import { createSessionStorage } from './services/sessionStorage';
 
     import type { LatLon } from '@windy/interfaces';
@@ -546,6 +555,7 @@
 
     // Conditions modal state
     let showConditionsModal = false;
+    let showHelpModal = false;
 
     // AirportDB search state
     let searchQuery = '';
@@ -2623,6 +2633,36 @@
 </script>
 
 <style lang="less">
+    /* Title row with help button */
+    .plugin__title-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-right: 8px;
+    }
+
+    .btn-help {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        color: rgba(255, 255, 255, 0.8);
+        font-size: 14px;
+        font-weight: bold;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+
+        &:hover {
+            background: rgba(74, 144, 226, 0.3);
+            border-color: rgba(74, 144, 226, 0.5);
+            color: #fff;
+        }
+    }
+
     /* Scrollable content wrapper */
     .main-content-scroll {
         display: flex;
