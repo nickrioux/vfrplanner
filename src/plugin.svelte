@@ -2601,11 +2601,15 @@
     // Note: Session is saved explicitly at key points (load file, add/delete waypoint, change settings, etc.)
     // This avoids excessive saves on every reactive update
 
-    export const onopen = (_params: unknown) => {
+    export const onopen = async (_params: unknown) => {
         // Load session when plugin opens
         loadSession();
         if (flightPlan) {
             updateMapLayers();
+            // Auto-fetch weather if route has waypoints
+            if (flightPlan.waypoints.length > 0) {
+                await handleReadWeather();
+            }
         }
     };
 
