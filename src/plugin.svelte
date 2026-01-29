@@ -2731,6 +2731,10 @@
         }
 
         &:focus {
+            outline: none;
+        }
+
+        &:focus-visible {
             outline: 2px solid rgba(255, 255, 255, 0.3);
             outline-offset: 2px;
         }
