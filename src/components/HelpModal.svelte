@@ -256,7 +256,7 @@
         </div>
 
         <div class="help-footer">
-            <span class="version">VFR Flight Planner v0.9.9</span>
+            <span class="version">VFR Flight Planner v1.0.0</span>
         </div>
     </div>
 </div>
