@@ -1,6 +1,6 @@
 {
     "name": "windy-plugin-vfr-planner",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "VFR flight planning plugin with ForeFlight import support",
     "main": "dist/plugin.min.js",
     "type": "module",
