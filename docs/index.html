@@ -326,6 +326,12 @@
         function copyUrl() {
             const url = document.getElementById('plugin-url').textContent;
             navigator.clipboard.writeText(url).then(() => {
+                // Track event in Google Analytics
+                gtag('event', 'copy_plugin_url', {
+                    'event_category': 'engagement',
+                    'event_label': 'Plugin URL Copied'
+                });
+
                 const btn = document.querySelector('.copy-btn');
                 btn.textContent = 'Copied!';
                 btn.classList.add('copied');
