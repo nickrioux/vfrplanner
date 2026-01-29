@@ -19,6 +19,12 @@ jobs:
               run: npm ci
             - name: Build (includes OurAirports data generation)
               run: npm run build
+            - name: Extract version
+              id: version
+              run: |
+                  VERSION=$(jq -r '.version' dist/plugin.json)
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "Plugin version: $VERSION"
             - name: Publish Plugin
               run: |
                   if [ -z "$WINDY_API_KEY" ]; then
@@ -33,3 +39,29 @@ jobs:
                   tar --exclude='*.map' -cf ../plugin.tar .
                   echo "Publishing plugin..."
                   curl -s --fail-with-body -XPOST 'https://node.windy.com/plugins/v1.0/upload' -H "x-windy-api-key: ${WINDY_API_KEY}" -F "plugin_archive=@../plugin.tar"
+            - name: Update landing page
+              run: |
+                  VERSION="${{ steps.version.outputs.version }}"
+                  echo "Updating landing page to version $VERSION"
+
+                  # Update version badge
+                  sed -i "s|<span class=\"version\">v[^<]*</span>|<span class=\"version\">v${VERSION}</span>|g" docs/index.html
+
+                  # Update plugin URL
+                  sed -i "s|windy-plugins.com/5748210/windy-plugin-vfr-planner/[^/]*/plugin.min.js|windy-plugins.com/5748210/windy-plugin-vfr-planner/${VERSION}/plugin.min.js|g" docs/index.html
+
+                  # Copy latest build to docs
+                  cp dist/plugin.js dist/plugin.min.js dist/plugin.json docs/
+
+                  echo "Landing page updated"
+            - name: Commit and push landing page
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git add docs/
+                  if git diff --staged --quiet; then
+                    echo "No changes to commit"
+                  else
+                    git commit -m "docs: update landing page to v${{ steps.version.outputs.version }}"
+                    git push
+                  fi
