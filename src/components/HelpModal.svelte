@@ -84,6 +84,9 @@
                             <span class="color-label"><strong>Gray</strong> - Unknown (no weather data)</span>
                         </div>
                     </div>
+
+                    <h4>More Waypoints = Better Evaluation</h4>
+                    <p>VFR conditions are evaluated at each waypoint. Adding intermediate waypoints along your route provides more weather evaluation points, giving you a more detailed picture of conditions along your flight path. This is especially useful for longer routes where weather can vary significantly.</p>
                 </section>
 
             {:else if activeTab === 'weather'}
@@ -196,6 +199,9 @@
 
                     <h4>Exit Edit Mode</h4>
                     <p>Click "Done" or press <strong>Escape</strong> to exit edit mode.</p>
+
+                    <h4>Tip: Add Waypoints for Better Weather Coverage</h4>
+                    <p>Weather and VFR conditions are evaluated at each waypoint. For long legs, consider adding intermediate waypoints every 20-50 NM to get more weather data points along your route. Click on the route line in Edit mode to insert waypoints between existing ones.</p>
                 </section>
 
             {:else if activeTab === 'settings'}
