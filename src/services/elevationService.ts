@@ -6,6 +6,9 @@
 import type { Waypoint } from '../types/flightPlan';
 import { logger } from './logger';
 
+/** Maximum points per API request to avoid URL length limits */
+const MAX_POINTS_PER_REQUEST = 100;
+
 export interface ElevationPoint {
     lat: number;
     lon: number;
@@ -130,9 +133,46 @@ export function sampleRoutePoints(
 }
 
 /**
+ * Fetch elevations from Open-Meteo API for a single batch of points
+ * @param points - Array of lat/lon points (should be <= MAX_POINTS_PER_REQUEST)
+ * @param enableLogging - Enable debug logging
+ * @returns Array of elevation values in meters MSL
+ */
+async function fetchElevationBatch(
+    points: Array<{ lat: number; lon: number }>,
+    enableLogging: boolean = false
+): Promise<number[]> {
+    // Open-Meteo accepts comma-separated lat/lon lists
+    const latitudes = points.map(p => p.lat.toFixed(6)).join(',');
+    const longitudes = points.map(p => p.lon.toFixed(6)).join(',');
+
+    const url = `https://api.open-meteo.com/v1/elevation?latitude=${latitudes}&longitude=${longitudes}`;
+
+    if (enableLogging) {
+        logger.debug(`[Elevation] Batch request for ${points.length} points`);
+    }
+
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(`Open-Meteo API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+
+    if (!data.elevation || !Array.isArray(data.elevation)) {
+        throw new Error('Invalid response from Open-Meteo API');
+    }
+
+    return data.elevation;
+}
+
+/**
  * Fetch elevations from Open-Meteo API for multiple points
  * Open-Meteo Elevation API: https://open-meteo.com/en/docs/elevation-api
  * Free, no API key required
+ *
+ * Automatically batches requests to avoid API limits (max 100 points per request)
  *
  * @param points - Array of lat/lon points
  * @param enableLogging - Enable debug logging
@@ -145,15 +185,8 @@ export async function fetchElevations(
     if (points.length === 0) return [];
 
     try {
-        // Open-Meteo accepts comma-separated lat/lon lists
-        const latitudes = points.map(p => p.lat.toFixed(6)).join(',');
-        const longitudes = points.map(p => p.lon.toFixed(6)).join(',');
-
-        const url = `https://api.open-meteo.com/v1/elevation?latitude=${latitudes}&longitude=${longitudes}`;
-
         if (enableLogging) {
             logger.debug(`[Elevation] Fetching elevations for ${points.length} points from Open-Meteo...`);
-            logger.debug(`[Elevation] API URL: ${url}`);
             // Log first 5 points being queried
             logger.debug('[Elevation] First 5 points queried:',
                 points.slice(0, 5).map((p, i) =>
@@ -162,34 +195,39 @@ export async function fetchElevations(
             );
         }
 
-        const response = await fetch(url);
+        // Split points into batches if needed
+        const allElevations: number[] = [];
+        const numBatches = Math.ceil(points.length / MAX_POINTS_PER_REQUEST);
 
-        if (!response.ok) {
-            throw new Error(`Open-Meteo API error: ${response.status} ${response.statusText}`);
+        if (enableLogging && numBatches > 1) {
+            logger.debug(`[Elevation] Splitting into ${numBatches} batches of max ${MAX_POINTS_PER_REQUEST} points`);
         }
 
-        const data = await response.json();
+        for (let i = 0; i < numBatches; i++) {
+            const start = i * MAX_POINTS_PER_REQUEST;
+            const end = Math.min(start + MAX_POINTS_PER_REQUEST, points.length);
+            const batch = points.slice(start, end);
 
-        if (enableLogging) {
-            logger.debug('[Elevation] Open-Meteo API response:', data);
-        }
+            if (enableLogging && numBatches > 1) {
+                logger.debug(`[Elevation] Fetching batch ${i + 1}/${numBatches} (points ${start + 1}-${end})`);
+            }
 
-        if (!data.elevation || !Array.isArray(data.elevation)) {
-            throw new Error('Invalid response from Open-Meteo API');
+            const batchElevations = await fetchElevationBatch(batch, enableLogging);
+            allElevations.push(...batchElevations);
         }
 
         // Combine elevations with original points
         const elevationPoints: ElevationPoint[] = points.map((point, index) => ({
             lat: point.lat,
             lon: point.lon,
-            elevation: data.elevation[index], // meters MSL
+            elevation: allElevations[index], // meters MSL
             distance: point.distance,
             waypointIndex: point.waypointIndex
         }));
 
         if (enableLogging) {
             logger.debug(`[Elevation] Received ${elevationPoints.length} elevation points`);
-            logger.debug(`[Elevation] Elevation range: ${Math.min(...data.elevation)}m to ${Math.max(...data.elevation)}m`);
+            logger.debug(`[Elevation] Elevation range: ${Math.min(...allElevations)}m to ${Math.max(...allElevations)}m`);
             // Log first 5 points with full details for debugging
             logger.debug('[Elevation] First 5 elevation points received:');
             elevationPoints.slice(0, 5).forEach((p, i) => {
