@@ -6,6 +6,7 @@
 import { tick } from 'svelte';
 import { routeStore, type RouteSettings } from '../stores/routeStore';
 import { weatherStore } from '../stores/weatherStore';
+import { settingsStore } from '../stores/settingsStore';
 import { readFPLFile, convertToFlightPlan, validateFPL } from '../parsers/fplParser';
 import { readGPXFile } from '../parsers/gpxParser';
 import { calculateFlightPlanNavigation } from '../services/navigationCalc';
@@ -24,7 +25,6 @@ import type { IAirportProvider, AirportSearchResult } from '../services/airportP
  * Dependencies for the route controller
  */
 export interface RouteControllerDeps {
-    getSettings: () => PluginSettings;
     getAirportProvider: () => IAirportProvider;
     onMapUpdate: () => void;
     onSaveSession: () => void;
@@ -41,11 +41,10 @@ export function initRouteController(dependencies: RouteControllerDeps): void {
 }
 
 /**
- * Get current settings from dependencies
+ * Get current settings from store
  */
 function getSettings(): PluginSettings {
-    if (!deps) throw new Error('Route controller not initialized');
-    return deps.getSettings();
+    return settingsStore.getState();
 }
 
 /**

@@ -5,3 +5,4 @@
 
 export * from './routeStore';
 export * from './weatherStore';
+export * from './settingsStore';

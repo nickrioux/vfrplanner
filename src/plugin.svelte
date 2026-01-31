@@ -331,7 +331,6 @@
     {#if activeTab === 'settings' && flightPlan}
         <!-- Settings Panel Component -->
         <SettingsPanel
-            bind:settings
             bind:maxProfileAltitude
             {flightPlan}
             conditionPreset={settings.conditionPreset}
@@ -428,6 +427,7 @@
         type VFRWindowState,
         type DepartureTimeState,
     } from './stores/weatherStore';
+    import { settingsStore } from './stores/settingsStore';
     import {
         initWeatherController,
         fetchWeatherForRoute,
@@ -527,8 +527,8 @@
         resetWeatherState();
     }
 
-    // Settings
-    let settings: PluginSettings = { ...DEFAULT_SETTINGS };
+    // Settings - reactive subscription to settingsStore
+    $: settings = $settingsStore;
 
     // Airport provider - automatically uses fallback when no API key
     let airportProvider: IAirportProvider = createAirportProvider(settings.airportdbApiKey);
@@ -826,8 +826,7 @@
     }
 
     function handleConditionsSave(event: CustomEvent<VfrConditionThresholds>) {
-        settings.customThresholds = event.detail;
-        settings.conditionPreset = 'custom';
+        settingsStore.setCustomThresholds(event.detail);
         showConditionsModal = false;
         // Trigger re-render and save
         handleSettingsChange();
@@ -838,10 +837,7 @@
     }
 
     function handlePresetChange(event: CustomEvent<ConditionPreset>) {
-        settings.conditionPreset = event.detail;
-        if (event.detail !== 'custom') {
-            settings.customThresholds = { ...getThresholdsForPreset(event.detail) };
-        }
+        settingsStore.setConditionPreset(event.detail);
         handleSettingsChange();
     }
 
@@ -1501,9 +1497,9 @@
 
             const data = sessionData as any;
 
-            // Restore settings
+            // Restore settings to store
             if (data.settings) {
-                settings = { ...DEFAULT_SETTINGS, ...data.settings };
+                settingsStore.loadSettings(data.settings);
             }
 
             // Restore departure time and sync setting to stores
@@ -1580,14 +1576,12 @@
         // Initialize weather controller with dependencies
         initWeatherController({
             pluginName: name,
-            getSettings: () => settings,
             onMapUpdate: () => updateMapLayers(),
             onSaveSession: () => saveSession(),
         });
 
         // Initialize route controller with dependencies
         initRouteController({
-            getSettings: () => settings,
             getAirportProvider: () => airportProvider,
             onMapUpdate: () => updateMapLayers(),
             onSaveSession: () => saveSession(),

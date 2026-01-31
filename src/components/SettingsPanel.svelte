@@ -1,12 +1,15 @@
 <script lang="ts">
     import { createEventDispatcher } from 'svelte';
-    import type { PluginSettings, FlightPlan } from '../types';
+    import type { FlightPlan } from '../types';
     import type { ConditionPreset } from '../types/conditionThresholds';
+    import { settingsStore } from '../stores/settingsStore';
 
-    export let settings: PluginSettings;
     export let maxProfileAltitude: number;
     export let flightPlan: FlightPlan | null;
     export let conditionPreset: ConditionPreset;
+
+    // Reactive subscription to settings store
+    $: settings = $settingsStore;
 
     const dispatch = createEventDispatcher<{
         change: void;
@@ -32,6 +35,75 @@
         dispatch('openConditionsModal');
     }
 
+    // Individual setting change handlers
+    function handleAircraftCategoryChange(e: Event) {
+        const value = (e.target as HTMLSelectElement).value as 'airplane' | 'helicopter';
+        settingsStore.setAircraftCategory(value);
+        handleChange();
+    }
+
+    function handleRegionChange(e: Event) {
+        const value = (e.target as HTMLSelectElement).value as 'canada' | 'usa' | 'europe';
+        settingsStore.setRegion(value);
+        handleChange();
+    }
+
+    function handleAirspeedChange(e: Event) {
+        const value = parseInt((e.target as HTMLInputElement).value, 10);
+        if (!isNaN(value)) {
+            settingsStore.setDefaultAirspeed(value);
+            handleChange();
+        }
+    }
+
+    function handleAltitudeChange(e: Event) {
+        const value = parseInt((e.target as HTMLInputElement).value, 10);
+        if (!isNaN(value)) {
+            settingsStore.setDefaultAltitude(value);
+            handleChange();
+        }
+    }
+
+    function handleAutoTerrainChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setAutoTerrainElevation(checked);
+        handleChange();
+    }
+
+    function handleShowLabelsChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setShowLabels(checked);
+        handleChange();
+    }
+
+    function handleIncludeNightFlightsChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setIncludeNightFlights(checked);
+        handleChange();
+    }
+
+    function handleMaxVFRWindowsChange(e: Event) {
+        const value = parseInt((e.target as HTMLInputElement).value, 10);
+        if (!isNaN(value)) {
+            settingsStore.setMaxVFRWindows(value);
+            handleChange();
+        }
+    }
+
+    function handleTerrainIntervalChange(e: Event) {
+        const value = parseFloat((e.target as HTMLInputElement).value);
+        if (!isNaN(value)) {
+            settingsStore.setTerrainSampleInterval(value);
+            handleChange();
+        }
+    }
+
+    function handleApiKeyChange(e: Event) {
+        const value = (e.target as HTMLInputElement).value;
+        settingsStore.setAirportDbApiKey(value);
+        handleChange();
+    }
+
     $: totalDistance = flightPlan?.totals.distance || 0;
     $: estimatedSamples = Math.ceil(totalDistance / settings.terrainSampleInterval) + (flightPlan?.waypoints.length || 0);
 </script>
@@ -40,7 +112,7 @@
     <div class="setting-group">
         <label class="setting-label">Aircraft Category</label>
         <div class="setting-input">
-            <select bind:value={settings.aircraftCategory} on:change={handleChange}>
+            <select value={settings.aircraftCategory} on:change={handleAircraftCategoryChange}>
                 <option value="airplane">Airplane</option>
                 <option value="helicopter">Helicopter</option>
             </select>
@@ -53,7 +125,7 @@
     <div class="setting-group">
         <label class="setting-label">Regulatory Region</label>
         <div class="setting-input">
-            <select bind:value={settings.region} on:change={handleChange}>
+            <select value={settings.region} on:change={handleRegionChange}>
                 <option value="canada">Canada (TC)</option>
                 <option value="usa">USA (FAA)</option>
                 <option value="europe">Europe (EASA)</option>
@@ -97,8 +169,8 @@
         <div class="setting-input">
             <input
                 type="number"
-                bind:value={settings.defaultAirspeed}
-                on:change={handleChange}
+                value={settings.defaultAirspeed}
+                on:change={handleAirspeedChange}
                 min="50"
                 max="500"
             />
@@ -111,8 +183,8 @@
         <div class="setting-input">
             <input
                 type="number"
-                bind:value={settings.defaultAltitude}
-                on:change={handleChange}
+                value={settings.defaultAltitude}
+                on:change={handleAltitudeChange}
                 min="0"
                 max="45000"
                 step="500"
@@ -125,8 +197,8 @@
         <label class="setting-checkbox">
             <input
                 type="checkbox"
-                bind:checked={settings.autoTerrainElevation}
-                on:change={handleChange}
+                checked={settings.autoTerrainElevation}
+                on:change={handleAutoTerrainChange}
             />
             Auto terrain elevation for departure/arrival
         </label>
@@ -139,8 +211,8 @@
         <label class="setting-checkbox">
             <input
                 type="checkbox"
-                bind:checked={settings.showLabels}
-                on:change={handleChange}
+                checked={settings.showLabels}
+                on:change={handleShowLabelsChange}
             />
             Show waypoint labels on map
         </label>
@@ -150,8 +222,8 @@
         <label class="setting-checkbox">
             <input
                 type="checkbox"
-                bind:checked={settings.includeNightFlights}
-                on:change={handleChange}
+                checked={settings.includeNightFlights}
+                on:change={handleIncludeNightFlightsChange}
             />
             Include night hours in VFR window search
         </label>
@@ -165,8 +237,8 @@
         <div class="setting-input">
             <input
                 type="number"
-                bind:value={settings.maxVFRWindows}
-                on:change={handleChange}
+                value={settings.maxVFRWindows}
+                on:change={handleMaxVFRWindowsChange}
                 min="1"
                 max="50"
             />
@@ -181,8 +253,8 @@
         <div class="setting-input">
             <input
                 type="number"
-                bind:value={settings.terrainSampleInterval}
-                on:change={handleChange}
+                value={settings.terrainSampleInterval}
+                on:change={handleTerrainIntervalChange}
                 min="1"
                 max="10"
                 step="0.5"
@@ -218,8 +290,8 @@
         <input
             type="password"
             class="setting-input api-key-input"
-            bind:value={settings.airportdbApiKey}
-            on:change={handleChange}
+            value={settings.airportdbApiKey}
+            on:change={handleApiKeyChange}
             placeholder="Optional - offline data available"
         />
         <div class="setting-description">

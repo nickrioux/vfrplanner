@@ -13,6 +13,7 @@ import {
     vfrWindowStore,
     departureTimeStore,
 } from '../stores/weatherStore';
+import { settingsStore } from '../stores/settingsStore';
 
 import {
     fetchFlightPlanWeather,
@@ -41,8 +42,6 @@ import type { Waypoint, FlightPlan } from '../types/flightPlan';
 export interface WeatherControllerDeps {
     /** Plugin name for API calls */
     pluginName: string;
-    /** Get current settings */
-    getSettings: () => PluginSettings;
     /** Callback to update map layers after weather fetch */
     onMapUpdate?: () => void;
     /** Callback to save session after weather fetch */
@@ -73,8 +72,8 @@ function ensureInitialized(): WeatherControllerDeps {
  * Main entry point for weather data fetching
  */
 export async function fetchWeatherForRoute(): Promise<void> {
-    const { pluginName, getSettings, onMapUpdate, onSaveSession } = ensureInitialized();
-    const settings = getSettings();
+    const { pluginName, onMapUpdate, onSaveSession } = ensureInitialized();
+    const settings = settingsStore.getState();
 
     const routeState = routeStore.getState();
     const { flightPlan } = routeState;
@@ -388,8 +387,8 @@ function logWindDataByWaypoint(
  * Search for VFR windows where conditions are acceptable along the entire route
  */
 export async function searchVFRWindows(): Promise<void> {
-    const { getSettings } = ensureInitialized();
-    const settings = getSettings();
+    ensureInitialized();
+    const settings = settingsStore.getState();
 
     const routeState = routeStore.getState();
     const { flightPlan } = routeState;
