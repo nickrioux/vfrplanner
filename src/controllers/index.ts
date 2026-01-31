@@ -39,3 +39,11 @@ export {
     toggleEditMode,
     type RouteControllerDeps,
 } from './routeController';
+
+export {
+    initMapController,
+    updateMapLayers,
+    clearMapLayers,
+    fitMapToRoute,
+    type MapControllerDeps,
+} from './mapController';
