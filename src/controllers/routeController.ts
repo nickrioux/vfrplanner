@@ -294,6 +294,8 @@ export async function addAirportToFlightPlan(airport: AirportDBResult): Promise<
         }
     }
 
+    // Wait for reactive updates to propagate before updating map
+    await tick();
     deps.onMapUpdate();
     deps.onSaveSession();
 
@@ -359,6 +361,8 @@ export async function addNavaidToFlightPlan(navaid: AirportDBNavaid): Promise<{ 
         }
     }
 
+    // Wait for reactive updates to propagate before updating map
+    await tick();
     deps.onMapUpdate();
     deps.onSaveSession();
 
@@ -416,6 +420,8 @@ export async function addWaypointFromMapClick(lat: number, lon: number): Promise
         }
     }
 
+    // Wait for reactive updates to propagate before updating map
+    await tick();
     deps.onMapUpdate();
     deps.onSaveSession();
 }

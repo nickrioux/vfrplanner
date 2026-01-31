@@ -586,6 +586,8 @@
             } else {
                 // Fit map to route after successful load
                 fitMapToRoute();
+                // Auto-fetch weather for the loaded plan
+                await fetchWeatherForRoute();
             }
         } finally {
             isLoading = false;
