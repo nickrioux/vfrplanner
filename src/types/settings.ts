@@ -2,8 +2,11 @@
  * Plugin settings types
  */
 
-import type { VfrConditionThresholds, ConditionPreset } from './conditionThresholds';
+import type { VfrConditionThresholds, ConditionPreset, AircraftCategory, Region } from './conditionThresholds';
 import { STANDARD_THRESHOLDS } from './conditionThresholds';
+
+// Re-export aircraft/region types for convenience
+export type { AircraftCategory, Region };
 
 export interface PluginSettings {
     // Aircraft defaults
@@ -37,6 +40,10 @@ export interface PluginSettings {
     // VFR Condition thresholds
     conditionPreset: ConditionPreset;
     customThresholds: VfrConditionThresholds;
+
+    // Aircraft category and region
+    aircraftCategory: AircraftCategory;
+    region: Region;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -54,4 +61,6 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     speedUnit: 'kt',
     conditionPreset: 'standard',
     customThresholds: { ...STANDARD_THRESHOLDS },
+    aircraftCategory: 'airplane',
+    region: 'canada',
 };

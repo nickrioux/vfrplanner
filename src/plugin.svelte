@@ -174,7 +174,8 @@
                     <label class="checkbox-label" title="When enabled, weather at each waypoint is forecast for your estimated arrival time. When disabled, all waypoints show weather for departure time.">
                         <input
                             type="checkbox"
-                            bind:checked={adjustForecastForFlightTime}
+                            checked={adjustForecastForFlightTime}
+                            on:change={(e) => weatherStore.setAdjustForecastForFlightTime(e.currentTarget.checked)}
                         />
                         Adjust forecast for flight time
                     </label>
@@ -259,20 +260,21 @@
             <!-- Departure Time Slider -->
             {#if forecastRange}
                 <DepartureSlider
-                    bind:departureTime
+                    departureTime={departureTime}
                     {forecastRange}
-                    bind:syncWithWindy
+                    syncWithWindy={syncWithWindy}
                     totalEte={flightPlan?.totals?.ete || 0}
                     canSearch={flightPlan && flightPlan.waypoints.length >= 2}
                     {isSearchingWindows}
                     {windowSearchProgress}
                     {windowSearchError}
                     {vfrWindows}
-                    bind:windowSearchMinCondition
+                    windowSearchMinCondition={windowSearchMinCondition}
                     on:change={handleDepartureTimeChange}
                     on:syncToggle={toggleWindySync}
                     on:findWindows={handleFindVFRWindows}
                     on:useWindow={(e) => useVFRWindow(e.detail)}
+                    on:minConditionChange={(e) => vfrWindowStore.setMinCondition(e.detail)}
                 />
             {/if}
         {/if}
@@ -411,7 +413,8 @@
     } from './services/airportProvider';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
     import { DEFAULT_SETTINGS } from './types';
-    import { getThresholdsForPreset, type VfrConditionThresholds, type ConditionPreset } from './types/conditionThresholds';
+    import { type VfrConditionThresholds, type ConditionPreset, getThresholdsForPreset } from './types/conditionThresholds';
+    import { getActiveThresholds } from './services/vfrConditionRules';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
     import SettingsPanel from './components/SettingsPanel.svelte';
     import ConditionsModal from './components/ConditionsModal.svelte';
@@ -421,6 +424,22 @@
     import DepartureSlider from './components/DepartureSlider.svelte';
     import { createSessionStorage } from './services/sessionStorage';
     import { routeStore, type RouteSettings } from './stores/routeStore';
+    import {
+        weatherStore,
+        vfrWindowStore,
+        departureTimeStore,
+        type WeatherState,
+        type VFRWindowState,
+        type DepartureTimeState,
+    } from './stores/weatherStore';
+    import {
+        initWeatherController,
+        fetchWeatherForRoute,
+        searchVFRWindows,
+        useVFRWindow as controllerUseVFRWindow,
+        resetWeatherState,
+        handleWindyTimestampChange as controllerHandleWindyTimestampChange,
+    } from './controllers/weatherController';
 
     import type { LatLon } from '@windy/interfaces';
 
@@ -457,30 +476,26 @@
     let showSearchPanel = false;
     let showExportMenu = false;
 
-    // Weather state
-    let weatherData: Map<string, WaypointWeather> = new Map();
-    let weatherAlerts: Map<string, WeatherAlert[]> = new Map();
-    let isLoadingWeather = false;
-    let weatherError: string | null = null;
-    let weatherModelWarning: string | null = null; // Warning when non-ECMWF model is used
-    let adjustForecastForFlightTime: boolean = true; // When true, forecast time adjusts for ETA at each waypoint
+    // Weather state - from weatherStore
+    $: weatherData = $weatherStore.weatherData;
+    $: weatherAlerts = $weatherStore.weatherAlerts;
+    $: isLoadingWeather = $weatherStore.isLoadingWeather;
+    $: weatherError = $weatherStore.weatherError;
+    $: weatherModelWarning = $weatherStore.weatherModelWarning;
+    $: elevationProfile = $weatherStore.elevationProfile;
+    $: forecastRange = $weatherStore.forecastRange;
+    $: adjustForecastForFlightTime = $weatherStore.adjustForecastForFlightTime;
 
-    // Elevation profile state
-    let elevationProfile: ElevationPoint[] = [];
+    // Departure time state - from departureTimeStore
+    $: departureTime = $departureTimeStore.time;
+    $: syncWithWindy = $departureTimeStore.syncWithWindy;
 
-    // Departure time state
-    let departureTime: number = Date.now();
-    let forecastRange: ForecastTimeRange | null = null;
-    let syncWithWindy: boolean = true;
-    let isUpdatingFromWindy: boolean = false;
-    let isUpdatingToWindy: boolean = false;
-
-    // VFR Window detection state
-    let isSearchingWindows = false;
-    let windowSearchProgress = 0;
-    let windowSearchMinCondition: MinimumConditionLevel = 'marginal';
-    let vfrWindows: VFRWindow[] | null = null;
-    let windowSearchError: string | null = null;
+    // VFR Window detection state - from vfrWindowStore
+    $: isSearchingWindows = $vfrWindowStore.isSearching;
+    $: windowSearchProgress = $vfrWindowStore.progress;
+    $: windowSearchMinCondition = $vfrWindowStore.minCondition;
+    $: vfrWindows = $vfrWindowStore.windows;
+    $: windowSearchError = $vfrWindowStore.error;
 
     // Mobile detection state
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -491,23 +506,7 @@
      * Clears weather data, VFR windows, and related state
      */
     function resetRoutePanel() {
-        // Clear weather state
-        weatherData = new Map();
-        weatherAlerts = new Map();
-        weatherError = null;
-        weatherModelWarning = null;
-        forecastRange = null;
-
-        // Clear VFR window state
-        vfrWindows = null;
-        windowSearchError = null;
-        windowSearchProgress = 0;
-        isSearchingWindows = false;
-
-        // Reset departure time to now
-        departureTime = Date.now();
-
-        logger.debug('Route panel state reset');
+        resetWeatherState();
     }
 
     // Settings
@@ -1339,9 +1338,9 @@
         routeStore.reverseRoute();
 
         // Clear weather data since arrival times will be incorrect after reversing
-        weatherData = new Map();
-        weatherAlerts = new Map();
-        weatherError = null;
+        weatherStore.setWeatherData(new Map());
+        weatherStore.setWeatherAlerts(new Map());
+        weatherStore.setError(null);
 
         // Update map layers
         updateMapLayers();
@@ -1349,288 +1348,13 @@
         saveSession();
     }
 
+    /**
+     * Fetch weather for the current flight plan
+     * Delegates to weatherController
+     */
     async function handleReadWeather() {
-        if (!flightPlan) return;
-
-        isLoadingWeather = true;
-        weatherError = null;
-        weatherModelWarning = null;
-
-        // Check if ECMWF model is selected - inform user about data sources
-        if (!isEcmwfModel()) {
-            const modelName = getCurrentModelName();
-            weatherModelWarning = `Using ${modelName} for surface data, ECMWF for ceiling and altitude winds.`;
-        }
-
-        try {
-            // Get forecast time range if not already loaded
-            if (!forecastRange && flightPlan.waypoints.length > 0) {
-                const firstWp = flightPlan.waypoints[0];
-                forecastRange = await getForecastTimeRange(firstWp.lat, firstWp.lon);
-
-                // Initialize departure time
-                if (forecastRange) {
-                    if (syncWithWindy) {
-                        // If sync is enabled, use Windy's current timestamp
-                        const windyTimestamp = store.get('timestamp') as number;
-                        if (windyTimestamp) {
-                            departureTime = Math.max(forecastRange.start, Math.min(windyTimestamp, forecastRange.end));
-                        } else {
-                            // Fallback to now if Windy timestamp not available
-                            const now = Date.now();
-                            departureTime = Math.max(forecastRange.start, Math.min(now, forecastRange.end));
-                        }
-                    } else {
-                        // If sync is disabled, use current time
-                        const now = Date.now();
-                        departureTime = Math.max(forecastRange.start, Math.min(now, forecastRange.end));
-                    }
-                }
-            }
-
-            // Fetch weather for all waypoints
-            // Use the planned altitude for wind data
-            const plannedAltitude = flightPlan.aircraft.defaultAltitude;
-
-            // Add overall timeout to prevent infinite hanging (60 seconds total)
-            const weatherFetchPromise = fetchFlightPlanWeather(
-                flightPlan.waypoints,
-                name,
-                departureTime,
-                plannedAltitude,
-                settings.enableLogging,
-                adjustForecastForFlightTime
-            );
-
-            const overallTimeout = new Promise<Map<string, WaypointWeather>>((_, reject) => {
-                setTimeout(() => {
-                    reject(new Error('Weather fetch operation timed out after 60 seconds'));
-                }, 60000);
-            });
-
-            weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
-
-            if (settings.enableLogging) {
-                logger.debug(`[Plugin] Weather fetch complete: ${weatherData.size} waypoints with weather data`);
-                if (weatherData.size > 0) {
-                    logger.debug(`[Plugin] Weather data keys:`, Array.from(weatherData.keys()));
-                    // Log detailed weather for each waypoint
-                    weatherData.forEach((wx, waypointId) => {
-                        const wp = flightPlan?.waypoints.find(w => w.id === waypointId);
-                        logger.debug(`[Plugin] Weather for ${wp?.name || waypointId}:`, {
-                            wind: `${Math.round(wx.windDir)}° @ ${Math.round(wx.windSpeed)} kt`,
-                            gust: wx.windGust ? `${Math.round(wx.windGust)} kt` : 'none',
-                            temp: `${Math.round(wx.temperature)}°C`,
-                            cloudBase: wx.cloudBase ? `${Math.round(wx.cloudBase)}m AGL` : 'clear',
-                            visibility: wx.visibility ? `${wx.visibility.toFixed(1)} km` : 'N/A',
-                            pressure: wx.pressure ? `${Math.round(wx.pressure)} hPa` : 'N/A',
-                            windAltitude: wx.windAltitude ? `${wx.windAltitude} ft` : 'surface'
-                        });
-                    });
-                }
-            }
-
-            // Check for alerts at each waypoint
-            // Wind/gust alerts only apply to terminal waypoints (departure/arrival)
-            weatherAlerts = new Map();
-            const waypointCount = flightPlan.waypoints.length;
-            weatherData.forEach((wx, waypointId) => {
-                // Determine if this is a terminal waypoint (first or last)
-                const waypointIndex = flightPlan!.waypoints.findIndex(wp => wp.id === waypointId);
-                const isTerminal = waypointIndex === 0 || waypointIndex === waypointCount - 1;
-                const alerts = checkWeatherAlerts(wx, DEFAULT_ALERT_THRESHOLDS, plannedAltitude, isTerminal);
-                if (alerts.length > 0) {
-                    weatherAlerts.set(waypointId, alerts);
-                }
-            });
-
-            // Fetch terrain elevation profile along the route
-            try {
-                if (settings.enableLogging) {
-                    logger.debug(`[Plugin] Fetching terrain elevation profile from Open-Meteo (sampling every ${settings.terrainSampleInterval} NM)...`);
-                }
-                elevationProfile = await fetchRouteElevationProfile(
-                    flightPlan.waypoints,
-                    settings.terrainSampleInterval,
-                    settings.enableLogging
-                );
-                if (settings.enableLogging) {
-                    logger.debug(`[Plugin] Terrain profile: ${elevationProfile.length} elevation points`);
-                }
-            } catch (elevError) {
-                logger.error('[Plugin] Error fetching elevation profile:', elevError);
-                elevationProfile = []; // Continue without terrain data
-            }
-
-            // Recalculate navigation with wind corrections
-            recalculateWithWind();
-
-            // Update map tooltips with the new weather data
-            updateMapLayers();
-        } catch (err) {
-            weatherError = err instanceof Error ? err.message : 'Failed to fetch weather';
-            logger.error('[Plugin] Error fetching weather:', err);
-            // Ensure weatherData is at least an empty Map on error
-            if (!weatherData || weatherData.size === 0) {
-                weatherData = new Map();
-            }
-        } finally {
-            isLoadingWeather = false;
-        }
-    }
-
-    function recalculateWithWind() {
-        if (!flightPlan) return;
-
-        logger.debug('=== FLIGHT TIME CALCULATION WITH WIND ===');
-        logger.debug(`TAS (True Airspeed): ${settings.defaultAirspeed} kt`);
-        logger.debug(`Default Cruise Altitude: ${settings.defaultAltitude} ft`);
-        logger.debug('NOTE: All tracks and wind directions are in TRUE NORTH reference');
-        logger.debug('');
-
-        // Debug: Show all wind data for each waypoint
-        logger.debug('=== WIND DATA BY WAYPOINT ===');
-        flightPlan.waypoints.forEach((wp, idx) => {
-            const wx = weatherData.get(wp.id);
-            if (wx) {
-                logger.debug(`WP${idx} ${wp.name || 'UNNAMED'} (alt: ${wp.altitude || 'N/A'} ft):`);
-                logger.debug(`  Wind reported: ${wx.windDir?.toFixed(0)}° @ ${wx.windSpeed?.toFixed(0)} kt`);
-                logger.debug(`  Wind level used: ${wx.windLevel || 'unknown'}`);
-                logger.debug(`  Wind altitude: ${wx.windAltitude || 'surface'} ft`);
-                if (wx.verticalWinds && wx.verticalWinds.length > 0) {
-                    logger.debug(`  Vertical wind profile:`);
-                    wx.verticalWinds.forEach(vw => {
-                        logger.debug(`    ${vw.level} (${vw.altitudeFeet} ft): ${vw.windDir.toFixed(0)}° @ ${vw.windSpeed.toFixed(0)} kt`);
-                    });
-                }
-            } else {
-                logger.debug(`WP${idx} ${wp.name || 'UNNAMED'}: No weather data`);
-            }
-        });
-        logger.debug('');
-
-        // Recalculate ground speed for each leg with wind correction
-        const updatedWaypoints = flightPlan.waypoints.map((wp, index) => {
-            if (index === 0) return wp;
-
-            const prevWp = flightPlan!.waypoints[index - 1];
-            const wx = weatherData.get(wp.id);
-
-            if (wx && wp.bearing !== undefined) {
-                // Calculate ground speed with wind correction
-                const gs = calculateGroundSpeed(
-                    settings.defaultAirspeed,
-                    wp.bearing,
-                    wx.windDir,
-                    wx.windSpeed
-                );
-
-                // Calculate headwind component for logging
-                const headwind = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
-
-                // Recalculate ETE with ground speed
-                const distance = wp.distance || 0;
-                const ete = gs > 0 ? (distance / gs) * 60 : 0; // minutes
-
-                // Calculate crosswind component for logging
-                const trackRad = (wp.bearing * Math.PI) / 180;
-                const windRad = (wx.windDir * Math.PI) / 180;
-                const crosswind = wx.windSpeed * Math.sin(windRad - trackRad);
-
-                // Log leg details with full calculation breakdown
-                logger.debug(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
-                logger.debug(`  Distance: ${distance.toFixed(1)} NM`);
-                logger.debug(`  Track (TRUE): ${wp.bearing.toFixed(0)}°`);
-                logger.debug(`  Wind (TRUE): ${wx.windDir.toFixed(0)}° @ ${wx.windSpeed.toFixed(0)} kt`);
-                logger.debug(`  --- Ground Speed Calculation ---`);
-                logger.debug(`    Wind angle relative to track: ${((wx.windDir - wp.bearing + 360) % 360).toFixed(0)}°`);
-                logger.debug(`    Formula: headwind = windSpeed × cos(windDir - track)`);
-                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × cos(${wx.windDir.toFixed(0)}° - ${wp.bearing.toFixed(0)}°)`);
-                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × cos(${(wx.windDir - wp.bearing).toFixed(0)}°)`);
-                logger.debug(`           = ${wx.windSpeed.toFixed(1)} × ${Math.cos((wx.windDir - wp.bearing) * Math.PI / 180).toFixed(3)}`);
-                logger.debug(`           = ${headwind.toFixed(1)} kt (${headwind >= 0 ? 'HEADWIND' : 'TAILWIND'})`);
-                logger.debug(`    Crosswind: ${Math.abs(crosswind).toFixed(1)} kt from ${crosswind >= 0 ? 'RIGHT' : 'LEFT'}`);
-                logger.debug(`    Ground Speed = TAS - headwind`);
-                logger.debug(`                 = ${settings.defaultAirspeed} - (${headwind.toFixed(1)})`);
-                logger.debug(`                 = ${gs.toFixed(1)} kt`);
-                logger.debug(`  --- ETE Calculation ---`);
-                logger.debug(`    ETE = Distance / Ground Speed × 60`);
-                logger.debug(`        = ${distance.toFixed(1)} / ${gs.toFixed(1)} × 60`);
-                logger.debug(`        = ${ete.toFixed(1)} min (${Math.floor(ete / 60)}h ${Math.round(ete % 60)}m)`);
-                logger.debug('');
-
-                return {
-                    ...wp,
-                    groundSpeed: gs,
-                    ete,
-                };
-            } else {
-                // Log leg without wind data
-                const distance = wp.distance || 0;
-                const ete = wp.ete || 0;
-                logger.debug(`LEG ${index}: ${prevWp.name || 'WPT'} → ${wp.name || 'WPT'}`);
-                logger.debug(`  Distance: ${distance.toFixed(1)} NM`);
-                logger.debug(`  Track (TRUE): ${wp.bearing !== undefined ? wp.bearing.toFixed(0) + '°' : 'N/A'}`);
-                logger.debug(`  Wind: No wind data available`);
-                logger.debug(`  Ground Speed: ${settings.defaultAirspeed} kt (using TAS, no wind correction)`);
-                logger.debug(`  ETE: ${ete.toFixed(1)} min`);
-                logger.debug('');
-            }
-
-            return wp;
-        });
-
-        // Recalculate totals
-        const totalEte = updatedWaypoints.reduce((sum, wp) => sum + (wp.ete || 0), 0);
-        const totalDistance = updatedWaypoints.reduce((sum, wp) => sum + (wp.distance || 0), 0);
-
-        // Calculate distance-weighted average headwind
-        let weightedHeadwindSum = 0;
-        updatedWaypoints.forEach((wp, index) => {
-            if (index === 0) return;
-            const wx = weatherData.get(wp.id);
-            if (wx && wp.bearing !== undefined && wp.distance) {
-                const headwind = calculateHeadwindComponent(wp.bearing, wx.windDir, wx.windSpeed);
-                weightedHeadwindSum += headwind * wp.distance;
-            }
-        });
-        const averageHeadwind = totalDistance > 0 ? weightedHeadwindSum / totalDistance : undefined;
-
-        // Log summary
-        logger.debug('=== FLIGHT SUMMARY ===');
-        logger.debug(`Total Distance: ${totalDistance.toFixed(1)} NM`);
-        logger.debug(`Total ETE: ${totalEte.toFixed(1)} min (${Math.floor(totalEte / 60)}h ${Math.round(totalEte % 60)}m)`);
-        if (averageHeadwind !== undefined) {
-            logger.debug(`Average Headwind: ${averageHeadwind >= 0 ? '+' : ''}${averageHeadwind.toFixed(1)} kt`);
-        }
-        logger.debug('=====================================');
-        logger.debug('');
-
-        // Build updates map for bulk waypoint update
-        const updates = new Map<string, Partial<Waypoint>>();
-        updatedWaypoints.forEach((wp, index) => {
-            if (index > 0 && wp.groundSpeed !== undefined) {
-                updates.set(wp.id, { groundSpeed: wp.groundSpeed, ete: wp.ete });
-            }
-        });
-
-        // Update waypoints using store if there are changes
-        if (updates.size > 0) {
-            routeStore.updateWaypoints(updates);
-        }
-
-        // Update totals - need to get fresh plan after waypoint updates
-        const currentPlan = $routeStore.flightPlan;
-        if (currentPlan) {
-            routeStore.setFlightPlan({
-                ...currentPlan,
-                totals: {
-                    ...currentPlan.totals,
-                    ete: totalEte,
-                    averageHeadwind,
-                },
-            });
-        }
+        await fetchWeatherForRoute();
+        saveSession();
     }
 
     function getWaypointWeather(waypointId: string): WaypointWeather | undefined {
@@ -1651,60 +1375,71 @@
         return '';
     }
 
-    async function handleDepartureTimeChange() {
+    /**
+     * Handle departure time change from DepartureSlider
+     * Updates store and re-fetches weather
+     */
+    async function handleDepartureTimeChange(event?: CustomEvent<number>) {
+        const newTime = event?.detail ?? departureTime;
+        departureTimeStore.setTime(newTime);
+
+        // Update Windy's timeline if sync is enabled
+        const depState = departureTimeStore.getState();
+        if (depState.syncWithWindy && !depState.isUpdatingFromWindy) {
+            departureTimeStore.setUpdatingToWindy(true);
+            try {
+                store.set('timestamp', newTime);
+            } finally {
+                setTimeout(() => {
+                    departureTimeStore.setUpdatingToWindy(false);
+                }, 100);
+            }
+        }
+
         // Re-fetch weather for the new departure time
         if (flightPlan && forecastRange) {
-            // Update Windy's timeline if sync is enabled and not triggered by Windy
-            if (syncWithWindy && !isUpdatingFromWindy && !isUpdatingToWindy) {
-                isUpdatingToWindy = true;
-                try {
-                    store.set('timestamp', departureTime);
-                } finally {
-                    // Use a small delay to avoid race conditions
-                    setTimeout(() => {
-                        isUpdatingToWindy = false;
-                    }, 100);
-                }
-            }
             await handleReadWeather();
-            saveSession();
         }
     }
 
+    /**
+     * Handle Windy timestamp change (sync from Windy timeline to plugin)
+     */
     function handleWindyTimestampChange(newTimestamp: number) {
+        const depState = departureTimeStore.getState();
+
         // Only sync if enabled and we have a forecast range
         // Skip if we're currently updating Windy (to avoid loops)
-        if (!syncWithWindy || !forecastRange || isLoadingWeather || isUpdatingToWindy) return;
+        if (!depState.syncWithWindy || !forecastRange || isLoadingWeather || depState.isUpdatingToWindy) return;
 
         // Clamp to forecast range
         const clampedTime = Math.max(forecastRange.start, Math.min(newTimestamp, forecastRange.end));
 
         // Only update if significantly different (avoid infinite loops)
-        // Reduced threshold to 5 seconds for better responsiveness
         if (Math.abs(clampedTime - departureTime) > 5000) {
-            isUpdatingFromWindy = true;
-            departureTime = clampedTime;
+            departureTimeStore.setUpdatingFromWindy(true);
+            departureTimeStore.setTime(clampedTime);
             handleReadWeather().finally(() => {
-                isUpdatingFromWindy = false;
+                departureTimeStore.setUpdatingFromWindy(false);
             });
         }
     }
 
+    /**
+     * Toggle sync between plugin departure time and Windy timeline
+     */
     function toggleWindySync() {
-        syncWithWindy = !syncWithWindy;
-        if (syncWithWindy && forecastRange) {
-            // Sync to current Windy timestamp
+        const currentSync = departureTimeStore.getState().syncWithWindy;
+        departureTimeStore.setSyncWithWindy(!currentSync);
+
+        if (!currentSync && forecastRange) {
+            // Sync to current Windy timestamp when enabling
             const windyTimestamp = store.get('timestamp') as number;
             if (windyTimestamp) {
-                // Use setTimeout to avoid immediate trigger during toggle
                 setTimeout(() => {
                     handleWindyTimestampChange(windyTimestamp);
                 }, 50);
             }
-        } else if (!syncWithWindy) {
-            // When disabling sync, ensure flags are reset
-            isUpdatingFromWindy = false;
-            isUpdatingToWindy = false;
         }
         saveSession();
     }
@@ -1814,24 +1549,27 @@
 
     /**
      * Find VFR windows where conditions are acceptable along the entire route
+     * Delegates to weatherController, but keeps CSV export logic here
      */
     async function handleFindVFRWindows() {
         if (!flightPlan || flightPlan.waypoints.length < 2) {
-            windowSearchError = 'Need at least 2 waypoints to search for VFR windows';
+            vfrWindowStore.setError('Need at least 2 waypoints to search for VFR windows');
             return;
         }
 
         if (flightPlan.totals.ete <= 0) {
-            windowSearchError = 'Cannot search without valid flight time (ETE)';
+            vfrWindowStore.setError('Cannot search without valid flight time (ETE)');
             return;
         }
 
-        isSearchingWindows = true;
-        windowSearchProgress = 0;
-        windowSearchError = null;
-        vfrWindows = null;
+        vfrWindowStore.setSearching(true);
+        vfrWindowStore.setProgress(0);
+        vfrWindowStore.setError(null);
+        vfrWindowStore.setWindows(null);
 
         try {
+            // Use aircraft-aware thresholds for VFR window search
+            const searchThresholds = getActiveThresholds(settings);
             const result = await findVFRWindows(
                 flightPlan.waypoints,
                 flightPlan.aircraft.defaultAltitude,
@@ -1840,24 +1578,26 @@
                     minimumCondition: windowSearchMinCondition,
                     maxConcurrent: 4,
                     maxWindows: settings.maxVFRWindows,
-                    startFrom: Date.now(), // Always start search from now
-                    collectDetailedData: settings.enableLogging, // Collect for CSV export only when debug logging enabled
+                    startFrom: Date.now(),
+                    collectDetailedData: settings.enableLogging,
                     includeNightFlights: settings.includeNightFlights,
                     routeCoordinates: { lat: flightPlan.waypoints[0].lat, lon: flightPlan.waypoints[0].lon },
+                    thresholds: searchThresholds,
                 },
                 (progress) => {
-                    windowSearchProgress = progress;
+                    vfrWindowStore.setProgress(progress);
                 },
                 settings.enableLogging
             );
 
-            vfrWindows = result.windows;
+            vfrWindowStore.setWindows(result.windows);
 
             if (result.windows.length === 0) {
                 if (result.limitedBy) {
-                    windowSearchError = result.limitedBy;
+                    vfrWindowStore.setError(result.limitedBy);
                 } else {
-                    windowSearchError = `No ${windowSearchMinCondition === 'good' ? 'good' : 'acceptable'} VFR windows found in forecast period`;
+                    const conditionLabel = windowSearchMinCondition === 'good' ? 'good' : 'acceptable';
+                    vfrWindowStore.setError(`No ${conditionLabel} VFR windows found in forecast period`);
                 }
             }
 
@@ -1871,9 +1611,9 @@
             }
         } catch (err) {
             logger.error('[Plugin] Error searching for VFR windows:', err);
-            windowSearchError = err instanceof Error ? err.message : 'Error searching for VFR windows';
+            vfrWindowStore.setError(err instanceof Error ? err.message : 'Error searching for VFR windows');
         } finally {
-            isSearchingWindows = false;
+            vfrWindowStore.setSearching(false);
         }
     }
 
@@ -1881,24 +1621,7 @@
      * Use a found VFR window by setting the departure time to its start
      */
     async function useVFRWindow(window: VFRWindow) {
-        departureTime = window.startTime;
-
-        // Update Windy's timeline to show weather at this time on the map
-        // Set flag to avoid triggering handleWindyTimestampChange feedback loop
-        isUpdatingToWindy = true;
-        try {
-            store.set('timestamp', window.startTime);
-        } finally {
-            setTimeout(() => {
-                isUpdatingToWindy = false;
-            }, 100);
-        }
-
-        // Refresh weather data for the route panel with the new departure time
-        if (flightPlan) {
-            await handleReadWeather();
-            saveSession();
-        }
+        await controllerUseVFRWindow(window);
     }
 
     // Map layer management
@@ -1917,7 +1640,8 @@
         if (!flightPlan || flightPlan.waypoints.length === 0) return;
 
         // Calculate profile data to get segment conditions
-        const thresholds = getThresholdsForPreset(settings.conditionPreset, settings.customThresholds);
+        // Use aircraft-aware thresholds based on category (airplane/helicopter) and region
+        const thresholds = getActiveThresholds(settings);
         const profileData = calculateProfileData(
             flightPlan.waypoints,
             weatherData,
@@ -2210,6 +1934,10 @@
 
     function saveSession() {
         try {
+            // Get current state from stores
+            const depState = departureTimeStore.getState();
+            const wxState = weatherStore.getState();
+
             const sessionData = {
                 flightPlan: flightPlan ? {
                     ...flightPlan,
@@ -2220,9 +1948,9 @@
                     })),
                 } : null,
                 settings,
-                departureTime,
-                syncWithWindy,
-                adjustForecastForFlightTime,
+                departureTime: depState.time,
+                syncWithWindy: depState.syncWithWindy,
+                adjustForecastForFlightTime: wxState.adjustForecastForFlightTime,
                 activeTab,
                 maxProfileAltitude,
                 profileScale,
@@ -2247,15 +1975,15 @@
                 settings = { ...DEFAULT_SETTINGS, ...data.settings };
             }
 
-            // Restore departure time and sync setting
+            // Restore departure time and sync setting to stores
             if (data.departureTime) {
-                departureTime = data.departureTime;
+                departureTimeStore.setTime(data.departureTime);
             }
             if (typeof data.syncWithWindy === 'boolean') {
-                syncWithWindy = data.syncWithWindy;
+                departureTimeStore.setSyncWithWindy(data.syncWithWindy);
             }
             if (typeof data.adjustForecastForFlightTime === 'boolean') {
-                adjustForecastForFlightTime = data.adjustForecastForFlightTime;
+                weatherStore.setAdjustForecastForFlightTime(data.adjustForecastForFlightTime);
             }
             if (data.activeTab) {
                 activeTab = data.activeTab;
@@ -2318,6 +2046,14 @@
     }
 
     onMount(() => {
+        // Initialize weather controller with dependencies
+        initWeatherController({
+            pluginName: name,
+            getSettings: () => settings,
+            onMapUpdate: () => updateMapLayers(),
+            onSaveSession: () => saveSession(),
+        });
+
         singleclick.on(name, handleMapClick);
         // Listen to Windy's timeline changes
         store.on('timestamp', handleWindyTimestampChange);

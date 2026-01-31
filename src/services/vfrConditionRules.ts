@@ -6,8 +6,26 @@
 
 import type { SegmentCondition } from './profileService';
 import type { VfrConditionThresholds } from '../types/conditionThresholds';
+import type { PluginSettings } from '../types/settings';
+import { getThresholdsForAircraft } from '../types/conditionThresholds';
 
 export { STANDARD_THRESHOLDS, CONSERVATIVE_THRESHOLDS } from '../types/conditionThresholds';
+
+/**
+ * Get the active VFR condition thresholds based on current settings
+ * Takes into account aircraft category (airplane/helicopter) and regulatory region
+ *
+ * @param settings - Plugin settings containing aircraft category, region, and threshold preferences
+ * @returns The appropriate VFR condition thresholds
+ */
+export function getActiveThresholds(settings: PluginSettings): VfrConditionThresholds {
+    return getThresholdsForAircraft(
+        settings.aircraftCategory || 'airplane',
+        settings.region || 'canada',
+        settings.conditionPreset || 'standard',
+        settings.customThresholds
+    );
+}
 
 /**
  * A single validation rule for VFR condition assessment

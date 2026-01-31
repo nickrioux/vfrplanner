@@ -38,6 +38,39 @@
 
 <div class="settings-section">
     <div class="setting-group">
+        <label class="setting-label">Aircraft Category</label>
+        <div class="setting-input">
+            <select bind:value={settings.aircraftCategory} on:change={handleChange}>
+                <option value="airplane">Airplane</option>
+                <option value="helicopter">Helicopter</option>
+            </select>
+        </div>
+        <div class="setting-description">
+            Helicopters have lower visibility minimums than airplanes.
+        </div>
+    </div>
+
+    <div class="setting-group">
+        <label class="setting-label">Regulatory Region</label>
+        <div class="setting-input">
+            <select bind:value={settings.region} on:change={handleChange}>
+                <option value="canada">Canada (TC)</option>
+                <option value="usa">USA (FAA)</option>
+                <option value="europe">Europe (EASA)</option>
+            </select>
+        </div>
+        <div class="setting-description">
+            {#if settings.aircraftCategory === 'helicopter'}
+                Helicopter VFR minimums: Canada 1.0 SM, USA 0.5 SM, Europe 800m.
+            {:else}
+                Affects VFR minimums for profile condition evaluation.
+            {/if}
+        </div>
+    </div>
+
+    <div class="setting-divider"></div>
+
+    <div class="setting-group">
         <label class="setting-label">VFR Condition Thresholds</label>
         <div class="setting-input">
             <select bind:value={conditionPreset} on:change={handlePresetChange}>
@@ -48,6 +81,9 @@
         </div>
         <div class="setting-description">
             Defines ceiling, visibility, wind and clearance limits for profile coloring.
+            {#if settings.aircraftCategory === 'helicopter' && conditionPreset !== 'custom'}
+                <br/><em>Using {settings.region === 'canada' ? 'Canadian' : settings.region === 'usa' ? 'US' : 'European'} helicopter minimums.</em>
+            {/if}
         </div>
         <button class="customize-btn" on:click={handleOpenModal}>
             Customize...

@@ -4,3 +4,4 @@
  */
 
 export * from './routeStore';
+export * from './weatherStore';

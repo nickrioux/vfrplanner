@@ -208,6 +208,23 @@
                 <section>
                     <h3>Settings</h3>
 
+                    <h4>Aircraft Category</h4>
+                    <p>Select your aircraft type for appropriate VFR minimums:</p>
+                    <ul>
+                        <li><strong>Airplane (Default):</strong> Standard VFR minimums for fixed-wing aircraft</li>
+                        <li><strong>Helicopter:</strong> Lower visibility minimums as allowed by regulations:
+                            <ul>
+                                <li>Canada (TC): 1.0 SM (1.6 km) minimum visibility</li>
+                                <li>USA (FAA): 0.5 SM (0.8 km) minimum visibility</li>
+                                <li>Europe (EASA): 800m minimum visibility</li>
+                            </ul>
+                        </li>
+                    </ul>
+                    <p><em>Note: Helicopters also have lower terrain and cloud clearance requirements due to their ability to hover and maneuver at low altitudes.</em></p>
+
+                    <h4>Regulatory Region</h4>
+                    <p>Select your operating region for accurate VFR minimums. This is especially important for helicopters, as visibility minimums vary significantly between regions.</p>
+
                     <h4>VFR Condition Thresholds</h4>
                     <p>Choose how strictly to evaluate VFR conditions:</p>
                     <ul>
@@ -215,6 +232,7 @@
                         <li><strong>Conservative:</strong> Higher minimums for extra safety margin</li>
                         <li><strong>Custom:</strong> Define your own ceiling, visibility, wind, and clearance limits</li>
                     </ul>
+                    <p><em>When Helicopter is selected, thresholds are automatically adjusted to region-specific minimums unless Custom is chosen.</em></p>
 
                     <h4>Default Airspeed (TAS)</h4>
                     <p>True airspeed used for calculating estimated time enroute (ETE) and ground speed when wind data is available. Set this to your typical cruise TAS.</p>

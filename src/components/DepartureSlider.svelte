@@ -42,6 +42,7 @@
             <select
                 class="condition-select"
                 bind:value={windowSearchMinCondition}
+                on:change={handleMinConditionChange}
                 disabled={isSearchingWindows}
             >
                 <option value="marginal">Marginal or better</option>
@@ -118,6 +119,7 @@
         syncToggle: void;
         findWindows: MinimumConditionLevel;
         useWindow: VFRWindow;
+        minConditionChange: MinimumConditionLevel;
     }>();
 
     function formatDepartureTime(timestamp: number): string {
@@ -169,6 +171,10 @@
 
     function handleFindWindows() {
         dispatch('findWindows', windowSearchMinCondition);
+    }
+
+    function handleMinConditionChange() {
+        dispatch('minConditionChange', windowSearchMinCondition);
     }
 
     function handleUseWindow(window: VFRWindow) {

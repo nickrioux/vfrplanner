@@ -4,6 +4,7 @@
  */
 
 import type { SegmentCondition } from '../services/profileService';
+import type { VfrConditionThresholds } from './conditionThresholds';
 
 /**
  * Minimum acceptable condition level for VFR flight
@@ -80,6 +81,8 @@ export interface VFRWindowSearchOptions {
     includeNightFlights?: boolean;
     /** Route coordinates for sun position calculation (first waypoint lat/lon) */
     routeCoordinates?: { lat: number; lon: number };
+    /** VFR condition thresholds (aircraft/region-specific) */
+    thresholds?: VfrConditionThresholds;
 }
 
 /**

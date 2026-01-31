@@ -7,6 +7,7 @@ import type { Waypoint } from '../types/flightPlan';
 import type { WaypointWeather, ForecastTimeRange, FullForecastData } from './weatherService';
 import { fetchWaypointWeather, getForecastTimeRange, fetchFullForecast, extractWeatherAtTimestamp } from './weatherService';
 import { evaluateSegmentCondition, type SegmentCondition, type ProfileDataPoint } from './profileService';
+import type { VfrConditionThresholds } from '../types/conditionThresholds';
 import type {
     MinimumConditionLevel,
     DepartureTimeEvaluation,
@@ -343,7 +344,8 @@ export async function evaluateDepartureTime(
     cache: WeatherCache,
     pluginName: string = 'VFR Planner',
     enableLogging: boolean = false,
-    forecastCache?: ForecastCache
+    forecastCache?: ForecastCache,
+    thresholds?: VfrConditionThresholds
 ): Promise<DepartureTimeEvaluation> {
     // Pre-calculate all waypoint timings
     const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
@@ -390,8 +392,8 @@ export async function evaluateDepartureTime(
             windDir: weather.windDir,
         };
 
-        // Evaluate the condition at this waypoint
-        const evaluation = evaluateSegmentCondition(point, altitude, weather, isTerminal, wp);
+        // Evaluate the condition at this waypoint (using aircraft-aware thresholds if provided)
+        const evaluation = evaluateSegmentCondition(point, altitude, weather, isTerminal, wp, thresholds);
 
         // Track worst condition
         if (worseCondition(evaluation.condition, worstCondition) === evaluation.condition) {
@@ -435,7 +437,8 @@ export async function evaluateDepartureTimeDetailed(
     cache: WeatherCache,
     pluginName: string = 'VFR Planner',
     enableLogging: boolean = false,
-    forecastCache?: ForecastCache
+    forecastCache?: ForecastCache,
+    thresholds?: VfrConditionThresholds
 ): Promise<{ evaluation: DepartureTimeEvaluation; details: WaypointEvaluationDetail[] }> {
     // Pre-calculate all waypoint timings
     const waypointInfos = calculateWaypointTimings(departureTime, waypoints, defaultAltitude);
@@ -495,8 +498,8 @@ export async function evaluateDepartureTimeDetailed(
             windDir: weather.windDir,
         };
 
-        // Evaluate the condition at this waypoint
-        const evaluation = evaluateSegmentCondition(point, altitude, weather, isTerminal, wp);
+        // Evaluate the condition at this waypoint (using aircraft-aware thresholds if provided)
+        const evaluation = evaluateSegmentCondition(point, altitude, weather, isTerminal, wp, thresholds);
 
         // Track worst condition
         if (worseCondition(evaluation.condition, worstCondition) === evaluation.condition) {
@@ -599,7 +602,8 @@ async function coarseScanForWindows(
     enableLogging: boolean = false,
     startFrom?: number,
     collectDetailedData: boolean = false,
-    forecastCache?: ForecastCache
+    forecastCache?: ForecastCache,
+    thresholds?: VfrConditionThresholds
 ): Promise<{ candidateRanges: { start: number; end: number }[]; detailedData: WaypointEvaluationDetail[] }> {
     const interval = 1 * 60 * 60 * 1000; // 1 hour in ms
     const timestamps: number[] = [];
@@ -633,7 +637,7 @@ async function coarseScanForWindows(
             // Use detailed evaluation for CSV export
             const batchResults = await Promise.all(
                 batch.map((t) =>
-                    evaluateDepartureTimeDetailed(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache)
+                    evaluateDepartureTimeDetailed(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache, thresholds)
                 )
             );
             for (const result of batchResults) {
@@ -644,7 +648,7 @@ async function coarseScanForWindows(
             // Use simple evaluation
             const batchResults = await Promise.all(
                 batch.map((t) =>
-                    evaluateDepartureTime(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache)
+                    evaluateDepartureTime(t, waypoints, defaultAltitude, minimumCondition, cache, 'VFR Planner', enableLogging, forecastCache, thresholds)
                 )
             );
             evaluations.push(...batchResults);
@@ -725,6 +729,7 @@ async function coarseScanForWindows(
  * @param precision - Target precision in minutes (default: 30)
  * @param enableLogging - Enable debug logging
  * @param forecastCache - Optional forecast cache for fast weather extraction
+ * @param thresholds - Optional VFR condition thresholds (aircraft-aware)
  * @returns Refined boundary timestamp
  */
 async function refineWindowBoundary(
@@ -736,7 +741,8 @@ async function refineWindowBoundary(
     cache: WeatherCache,
     precision: number = 30,
     enableLogging: boolean = false,
-    forecastCache?: ForecastCache
+    forecastCache?: ForecastCache,
+    thresholds?: VfrConditionThresholds
 ): Promise<number> {
     const precisionMs = precision * 60 * 1000;
     let good = knownGood;
@@ -752,7 +758,8 @@ async function refineWindowBoundary(
             cache,
             'VFR Planner',
             enableLogging,
-            forecastCache
+            forecastCache,
+            thresholds
         );
 
         if (midEval.isAcceptable) {
@@ -784,6 +791,7 @@ export async function findVFRWindows(
         collectDetailedData = false,
         includeNightFlights = false,
         routeCoordinates,
+        thresholds,
     } = options;
 
     // Get forecast time range from first waypoint
@@ -852,7 +860,8 @@ export async function findVFRWindows(
         enableLogging,
         startFrom,
         collectDetailedData,
-        forecastCache
+        forecastCache,
+        thresholds
     );
 
     // Phase 2: Refine boundaries for each candidate range
@@ -881,7 +890,8 @@ export async function findVFRWindows(
                 cache,
                 30,
                 enableLogging,
-                forecastCache
+                forecastCache,
+                thresholds
             );
         }
         refinementDone++;
@@ -901,7 +911,8 @@ export async function findVFRWindows(
                 cache,
                 30,
                 enableLogging,
-                forecastCache
+                forecastCache,
+                thresholds
             );
         }
         refinementDone++;
