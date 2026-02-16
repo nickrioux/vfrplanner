@@ -1,10 +1,8 @@
 /**
  * Session Storage Service
- * Hybrid storage using Windy store (primary) with localStorage fallback
- * Provides mobile-compatible session persistence
+ * Uses localStorage for session persistence
  */
 
-import store from '@windy/store';
 import { logger } from './logger';
 
 /**
@@ -26,38 +24,6 @@ export interface SessionData {
  */
 export function createSessionStorage(pluginName: string) {
     const STORAGE_KEY = `vfr-planner-session-${pluginName}`;
-    const WINDY_STORE_KEY = 'plugin-vfr-planner-session';
-
-    /**
-     * Save data to @windy/store
-     * @returns true if save succeeded
-     */
-    function saveToWindyStore(data: object): boolean {
-        try {
-            (store as any).set(WINDY_STORE_KEY, data);
-            return true;
-        } catch (err) {
-            logger.warn('Failed to save to Windy store:', err);
-            return false;
-        }
-    }
-
-    /**
-     * Load data from @windy/store
-     * @returns data object or null if not found/error
-     */
-    function loadFromWindyStore(): object | null {
-        try {
-            const data = (store as any).get(WINDY_STORE_KEY);
-            if (data && typeof data === 'object') {
-                return data;
-            }
-            return null;
-        } catch (err) {
-            logger.warn('Failed to load from Windy store:', err);
-            return null;
-        }
-    }
 
     /**
      * Save data to localStorage
@@ -89,14 +55,9 @@ export function createSessionStorage(pluginName: string) {
     }
 
     /**
-     * Clear session data from both storage systems
+     * Clear session data
      */
     function clear(): void {
-        try {
-            (store as any).set(WINDY_STORE_KEY, null);
-        } catch (err) {
-            logger.warn('Failed to clear Windy store session:', err);
-        }
         try {
             localStorage.removeItem(STORAGE_KEY);
         } catch (err) {
@@ -105,47 +66,23 @@ export function createSessionStorage(pluginName: string) {
     }
 
     /**
-     * Save session data to both storage systems for redundancy
-     * Windy store: primary, potentially cloud-synced in future
-     * localStorage: fallback for mobile sandboxing issues
+     * Save session data
      */
     function save(data: object): boolean {
-        const windySaved = saveToWindyStore(data);
-        const localSaved = saveToLocalStorage(data);
-
-        if (!windySaved && !localSaved) {
-            logger.warn('Failed to save session to any storage');
-            return false;
-        }
-        return true;
+        return saveToLocalStorage(data);
     }
 
     /**
-     * Load session data from storage
-     * Tries Windy store first (may be more reliable on mobile)
-     * Falls back to localStorage if Windy store has no data
+     * Load session data
      */
     function load(): object | null {
-        // Try Windy store first
-        let data = loadFromWindyStore();
-
-        if (!data) {
-            // Fall back to localStorage
-            data = loadFromLocalStorage();
-        }
-
-        return data;
+        return loadFromLocalStorage();
     }
 
     return {
         save,
         load,
         clear,
-        // Expose low-level functions for testing/debugging
-        _saveToWindyStore: saveToWindyStore,
-        _loadFromWindyStore: loadFromWindyStore,
-        _saveToLocalStorage: saveToLocalStorage,
-        _loadFromLocalStorage: loadFromLocalStorage,
     };
 }
 

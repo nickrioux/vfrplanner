@@ -2,7 +2,7 @@
 
 Your pre-flight weather window assistant. A Windy plugin for VFR flight planning with flight plan import, weather integration, and altitude profile visualization.
 
-![Version](https://img.shields.io/badge/version-1.0.1-blue)
+![Version](https://img.shields.io/badge/version-1.0.2-blue)
 ![License](https://img.shields.io/badge/license-ISC-green)
 
 ## Features
@@ -119,6 +119,12 @@ npm run build
 ```
 
 ## Changelog
+
+### v1.0.2
+- Fixed Windy GL renderer compatibility for map layer removal
+- Fixed tooltip support by replacing CircleMarker with DivIcon markers
+- Removed Windy store dependency for session storage (use localStorage only)
+- Fixed cloud base AGL-to-MSL conversion test
 
 ### v0.9.9
 - VFR Window Finder to scan forecast for best departure times

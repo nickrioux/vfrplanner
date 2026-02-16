@@ -7,6 +7,7 @@
     import type { ElevationPoint } from '../services/elevationService';
     import { lerpAngle } from '../utils/interpolation';
     import { logger } from '../services/logger';
+    import { getActiveThresholds } from '../services/vfrConditionRules';
 
     export let flightPlan: FlightPlan;
     export let weatherData: Map<string, WaypointWeather>;
@@ -30,7 +31,9 @@
     let cursorData: ProfileDataPoint | null = null;
 
     // Calculate profile data - includes all terrain samples + waypoints
-    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude, elevationProfile);
+    // Use aircraft-aware thresholds to match mapController's evaluation
+    $: thresholds = getActiveThresholds(settings);
+    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude, elevationProfile, thresholds);
 
     // Extract only waypoint data for flight path and wind display
     $: waypointProfileData = profileData.filter(p => p.waypointId !== undefined);

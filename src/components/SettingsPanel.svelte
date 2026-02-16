@@ -104,6 +104,12 @@
         handleChange();
     }
 
+    function handleEnableLoggingChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setEnableLogging(checked);
+        handleChange();
+    }
+
     $: totalDistance = flightPlan?.totals.distance || 0;
     $: estimatedSamples = Math.ceil(totalDistance / settings.terrainSampleInterval) + (flightPlan?.waypoints.length || 0);
 </script>
@@ -300,6 +306,7 @@
             <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
         </div>
     </div>
+
 
 </div>
 

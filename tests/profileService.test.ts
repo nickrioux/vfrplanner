@@ -390,8 +390,8 @@ describe('Profile Service', () => {
             const waypoints = [
                 createWaypoint('1', 'WP1', 47.5, -122.3, 3000),
             ];
-            // Add elevation to waypoint
-            waypoints[0].elevation = 305; // ~1000 ft in meters
+            // Add elevation to waypoint (feet MSL per Waypoint type)
+            waypoints[0].elevation = 1000;
 
             const weatherData = new Map<string, WaypointWeather>();
             weatherData.set('1', {

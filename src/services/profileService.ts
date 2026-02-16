@@ -213,11 +213,22 @@ export function evaluateSegmentCondition(
         cloudBaseAGL = cloudBaseMSL - terrainMSL;
         cloudClearance = cloudBaseMSL - flightAltitude;
 
+        // Debug logging for cloud/altitude evaluation
+        logger.debug(`[Condition] ${waypoint?.name || 'Unknown'}: ` +
+            `cloudBaseMSL=${Math.round(cloudBaseMSL)}ft, ` +
+            `cloudBaseAGL=${Math.round(cloudBaseAGL)}ft, ` +
+            `terrainMSL=${Math.round(terrainMSL)}ft, ` +
+            `flightAlt=${Math.round(flightAltitude)}ft, ` +
+            `cloudClearance=${Math.round(cloudClearance)}ft`);
+
         // Check for IMC conditions (flying in clouds) - CRITICAL
         if (flightAltitude >= cloudBaseMSL) {
+            logger.debug(`[Condition] ${waypoint?.name || 'Unknown'}: IMC detected - flight ${Math.round(flightAltitude)}ft >= cloudBase ${Math.round(cloudBaseMSL)}ft`);
             reasons.push('Aircraft above cloud base (IMC)');
             return { condition: 'poor', reasons };
         }
+    } else {
+        logger.debug(`[Condition] ${waypoint?.name || 'Unknown'}: No cloud data (clear sky)`);
     }
 
     // Initialize best runway for terminal waypoints
@@ -266,6 +277,12 @@ export function evaluateSegmentCondition(
 
     // Use rules-based evaluation with thresholds
     const ruleResult = evaluateAllRules(criteria, isTerminal, thresholds);
+
+    // Debug logging for final result
+    if (ruleResult.condition !== 'good') {
+        logger.debug(`[Condition] ${waypoint?.name || 'Unknown'}: Result=${ruleResult.condition.toUpperCase()}, ` +
+            `reasons=[${ruleResult.reasons.join(', ')}]`);
+    }
 
     return {
         condition: ruleResult.condition,
@@ -470,7 +487,8 @@ export function calculateProfileData(
         waypoints.forEach((wp, index) => {
             const wx = weatherData.get(wp.id);
             const altitude = wp.altitude ?? defaultAltitude;
-            const terrainElevation = wp.elevation ? metersToFeet(wp.elevation) : undefined;
+            // wp.elevation is already in feet MSL (no conversion needed)
+            const terrainElevation = wp.elevation ?? undefined;
 
             // Get cloud data
             let cloudBase: number | undefined;

@@ -159,6 +159,16 @@ export async function fetchWaypointWeather(
     altitude?: number,
     enableLogging: boolean = false
 ): Promise<WaypointWeather | null> {
+    // Validate coordinates before making API call
+    if (typeof lat !== 'number' || typeof lon !== 'number' ||
+        isNaN(lat) || isNaN(lon) ||
+        lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+        if (enableLogging) {
+            logger.warn(`[Weather] Invalid coordinates for ${waypointName || 'waypoint'}: lat=${lat}, lon=${lon}`);
+        }
+        return null;
+    }
+
     try {
         // Get current product from store (same as Windy picker uses)
         const product = store.get('product') as Products;
@@ -207,68 +217,20 @@ export async function fetchWaypointWeather(
                 options.levels = levels;
             }
             
-            try {
-                const pointForecastResponse: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
-            product,
-            { lat, lon },
-            options,
-            {}
-        );
+            // Use Windy's plugin API for weather data
+            const pointForecastResponse: HttpPayload<WeatherDataPayload<DataHash>> = await getPointForecastData(
+                product,
+                { lat, lon },
+                options,
+                {}
+            );
 
-                // Check if response has level-specific data
-                const data = pointForecastResponse.data?.data;
-                if (data && (data[`wind-${pressureLevel}`] || data.wind)) {
-                    // Response has the data we need
-                    responseData = data;
-                } else {
-                    // No level-specific data, try direct API
-                    throw new Error('No level-specific data in response');
-                }
-            } catch (pointForecastError) {
-                // getPointForecastData doesn't support levels, try direct API call
-                if (enableLogging && waypointName) {
-                    logger.debug(`[Weather] getPointForecastData doesn't support levels, trying direct API for ${waypointName}`);
-                }
-                
-                const requestBody = {
-                    lat,
-                    lon,
-                    model: product,
-                    parameters: ['wind', 'windDir', 'temp', 'dewPoint', 'pressure', 'rh', 'mm', 'cbase', 'gust'],
-                    levels: levels
-                };
-
-                // Use native fetch to call Windy's Point Forecast API
-                // Note: This may require API key or may not work from plugin context
-                const apiUrl = 'https://api.windy.com/api/point-forecast/v2';
-                const apiResponse = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-
-                const responseStatus = apiResponse.status;
-                const responseStatusText = apiResponse.statusText;
-                
-                // Read response body once
-                let responseBodyText = '';
-                let apiResult: { data?: WindyPointForecastData } | WindyPointForecastData | null = null;
-                try {
-                    responseBodyText = await apiResponse.text();
-                    if (responseBodyText) {
-                        apiResult = JSON.parse(responseBodyText);
-                    }
-                } catch (e) {
-                    responseBodyText = 'Could not parse response';
-                }
-
-                if (!apiResponse.ok) {
-                    throw new Error(`Point Forecast API returned ${responseStatus}: ${responseStatusText}`);
-                }
-
-                responseData = apiResult?.data || apiResult;
+            // Get the response data
+            const data = pointForecastResponse.data?.data;
+            if (data) {
+                responseData = data;
+            } else {
+                throw new Error('No data in response');
             }
         } catch (apiError) {
             // If both methods fail, fall back to getPointForecastData for surface data

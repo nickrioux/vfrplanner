@@ -4,7 +4,9 @@
  */
 
 import { map } from '@windy/map';
-import * as L from 'leaflet';
+
+// Leaflet is provided globally by Windy
+declare const L: typeof import('leaflet');
 
 import { routeStore } from '../stores/routeStore';
 import { weatherStore } from '../stores/weatherStore';
@@ -157,45 +159,36 @@ export function updateMapLayers(): void {
     markerMap.clear();
 
     flightPlan.waypoints.forEach((wp, index) => {
-        let marker: L.Marker | L.CircleMarker;
         const currentIsEditMode = routeStore.getState().isEditMode;
+        const markerColor = getMarkerColor(wp.type);
+
+        // Always use DivIcon markers (DOM elements) to avoid Windy GL renderer
+        // issues with tooltips and path removal on CircleMarker/SVG paths
+        const marker = new L.Marker([wp.lat, wp.lon], {
+            draggable: currentIsEditMode,
+            icon: new L.DivIcon({
+                className: 'wp-marker',
+                html: `<div style="
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 50%;
+                    background: ${markerColor};
+                    border: 2px solid white;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                "></div>`,
+                iconSize: [16, 16],
+                iconAnchor: [8, 8],
+            }),
+        });
 
         if (currentIsEditMode) {
-            // Use regular marker for dragging in edit mode
-            marker = new L.Marker([wp.lat, wp.lon], {
-                draggable: true,
-                icon: new L.DivIcon({
-                    className: 'wp-marker',
-                    html: `<div style="
-                        width: 16px;
-                        height: 16px;
-                        border-radius: 50%;
-                        background: ${getMarkerColor(wp.type)};
-                        border: 2px solid white;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-                    "></div>`,
-                    iconSize: [16, 16],
-                    iconAnchor: [8, 8],
-                }),
-            });
-
             marker.on('dragend', (e: L.DragEndEvent) => {
                 const latlng = e.target.getLatLng();
                 onMarkerDrag(wp.id, latlng.lat, latlng.lng);
             });
-
-            markerMap.set(wp.id, marker as L.Marker);
-        } else {
-            // Use circle marker (non-draggable)
-            marker = new L.CircleMarker([wp.lat, wp.lon], {
-                radius: 8,
-                fillColor: getMarkerColor(wp.type),
-                color: '#fff',
-                weight: 2,
-                opacity: 1,
-                fillOpacity: 0.8,
-            });
         }
+
+        markerMap.set(wp.id, marker);
 
         // Build tooltip content with weather and condition info
         const tooltipContent = buildWaypointTooltip(wp, index, flightPlan, profileData);
@@ -376,12 +369,21 @@ function buildWaypointTooltip(
  */
 export function clearMapLayers(): void {
     if (routeLayer) {
-        routeLayer.remove();
+        try {
+            map.removeLayer(routeLayer);
+        } catch (_e) {
+            // Windy's GL renderer may throw when removing paths;
+            // ignore since we're discarding the layer group anyway.
+        }
         routeLayer = null;
     }
 
     if (waypointMarkers) {
-        waypointMarkers.remove();
+        try {
+            map.removeLayer(waypointMarkers);
+        } catch (_e) {
+            // Same GL renderer issue with CircleMarker paths
+        }
         waypointMarkers = null;
     }
 

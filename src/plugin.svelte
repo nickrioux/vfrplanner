@@ -530,13 +530,12 @@
     $: settings = $settingsStore;
 
     // Airport provider - automatically uses fallback when no API key
-    let airportProvider: IAirportProvider = createAirportProvider(settings.airportdbApiKey);
+    // Uses reactive statement to update when API key changes
+    let airportProvider: IAirportProvider;
+    $: airportProvider = createAirportProvider($settingsStore.airportdbApiKey);
 
     // Sync logger state with settings
     $: logger.setEnabled(settings.enableLogging);
-
-    // Update airport provider when API key changes
-    $: airportProvider = createAirportProvider(settings.airportdbApiKey);
 
     // Profile state
     let maxProfileAltitude: number = 15000;
@@ -1238,7 +1237,41 @@
     // Note: Session is saved explicitly at key points (load file, add/delete waypoint, change settings, etc.)
     // This avoids excessive saves on every reactive update
 
+    // Track if controllers have been initialized
+    let controllersInitialized = false;
+
+    function initializeControllers() {
+        if (controllersInitialized) return;
+
+        // Initialize weather controller with dependencies
+        initWeatherController({
+            pluginName: name,
+            onMapUpdate: () => updateMapLayers(),
+            onSaveSession: () => saveSession(),
+        });
+
+        // Initialize route controller with dependencies
+        initRouteController({
+            getAirportProvider: () => airportProvider,
+            onMapUpdate: () => updateMapLayers(),
+            onSaveSession: () => saveSession(),
+            onResetWeather: () => resetWeatherState(),
+        });
+
+        // Initialize map controller with callbacks
+        initMapController({
+            onSegmentClick: (segmentIndex, lat, lon) => insertWaypointOnSegment(segmentIndex, lat, lon),
+            onMarkerDrag: (waypointId, lat, lon) => handleWaypointDrag(waypointId, lat, lon),
+            onMarkerClick: (waypointId) => routeStore.selectWaypoint(waypointId),
+        });
+
+        controllersInitialized = true;
+    }
+
     export const onopen = async (_params: unknown) => {
+        // Ensure controllers are initialized (onopen may run before onMount)
+        initializeControllers();
+
         // Load session when plugin opens
         await loadSession();
         if (flightPlan) {
@@ -1262,27 +1295,8 @@
     }
 
     onMount(() => {
-        // Initialize weather controller with dependencies
-        initWeatherController({
-            pluginName: name,
-            onMapUpdate: () => updateMapLayers(),
-            onSaveSession: () => saveSession(),
-        });
-
-        // Initialize route controller with dependencies
-        initRouteController({
-            getAirportProvider: () => airportProvider,
-            onMapUpdate: () => updateMapLayers(),
-            onSaveSession: () => saveSession(),
-            onResetWeather: () => resetWeatherState(),
-        });
-
-        // Initialize map controller with callbacks
-        initMapController({
-            onSegmentClick: (segmentIndex, lat, lon) => insertWaypointOnSegment(segmentIndex, lat, lon),
-            onMarkerDrag: (waypointId, lat, lon) => handleWaypointDrag(waypointId, lat, lon),
-            onMarkerClick: (waypointId) => routeStore.selectWaypoint(waypointId),
-        });
+        // Ensure controllers are initialized (may already be done by onopen)
+        initializeControllers();
 
         singleclick.on(name, handleMapClick);
         // Listen to Windy's timeline changes

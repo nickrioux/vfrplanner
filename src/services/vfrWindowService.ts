@@ -374,11 +374,16 @@ export async function evaluateDepartureTime(
         }
 
         // Create a profile data point for condition evaluation
-        const terrainElevation = wp.elevation ? metersToFeet(wp.elevation) : 0;
+        // wp.elevation is already in feet MSL (no conversion needed)
+        const terrainElevation = wp.elevation ?? 0;
         let cloudBase: number | undefined;
         if (weather.cloudBase !== undefined && weather.cloudBase > 0) {
             const cloudBaseAGL = metersToFeet(weather.cloudBase);
             cloudBase = cloudBaseAGL + terrainElevation;
+            if (enableLogging) {
+                logger.debug(`[VFR Window] ${wp.name}: weather.cloudBase=${Math.round(weather.cloudBase)}m (${Math.round(cloudBaseAGL)}ft AGL), ` +
+                    `terrain=${Math.round(terrainElevation)}ft, cloudBaseMSL=${Math.round(cloudBase)}ft, flightAlt=${altitude}ft`);
+            }
         }
 
         const point: ProfileDataPoint = {
@@ -466,7 +471,7 @@ export async function evaluateDepartureTimeDetailed(
                 arrivalTime,
                 arrivalTimeISO: new Date(arrivalTime).toISOString(),
                 altitude,
-                terrainElevation: wp.elevation ? metersToFeet(wp.elevation) : 0,
+                terrainElevation: wp.elevation ?? 0, // wp.elevation is already in feet
                 windSpeed: 0,
                 windDir: 0,
                 temperature: 0,
@@ -478,7 +483,8 @@ export async function evaluateDepartureTimeDetailed(
         }
 
         // Create a profile data point for condition evaluation
-        const terrainElevation = wp.elevation ? metersToFeet(wp.elevation) : 0;
+        // wp.elevation is already in feet MSL (no conversion needed)
+        const terrainElevation = wp.elevation ?? 0;
         let cloudBase: number | undefined;
         let cloudBaseFt: number | undefined;
         if (weather.cloudBase !== undefined && weather.cloudBase > 0) {
