@@ -19,7 +19,7 @@
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/nrioux/windy-plugin-vfr-planner.git"
+        "url": "git+https://github.com/nickrioux/vfrplanner.git"
     },
     "keywords": [
         "windy",
@@ -33,9 +33,9 @@
     "author": "Nicolas",
     "license": "MIT",
     "bugs": {
-        "url": "https://github.com/nrioux/windy-plugin-vfr-planner/issues"
+        "url": "https://github.com/nickrioux/vfrplanner/issues"
     },
-    "homepage": "https://github.com/nrioux/windy-plugin-vfr-planner",
+    "homepage": "https://github.com/nickrioux/vfrplanner",
     "dependencies": {
         "@turf/turf": "^6.5.0",
         "@windycom/plugin-devtools": "^3.0.1",

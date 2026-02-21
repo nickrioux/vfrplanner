@@ -3,7 +3,7 @@
 Your pre-flight weather window assistant. A Windy plugin for VFR flight planning with flight plan import, weather integration, and altitude profile visualization.
 
 ![Version](https://img.shields.io/badge/version-1.0.2-blue)
-![License](https://img.shields.io/badge/license-ISC-green)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
 
@@ -126,6 +126,21 @@ npm run build
 - Removed Windy store dependency for session storage (use localStorage only)
 - Fixed cloud base AGL-to-MSL conversion test
 
+### v1.0.1
+- Fixed Safari button focus state persistence after click
+
+### v1.0.0
+- Public release
+- Major codebase refactoring: centralized route store, modular weather service, extracted UI components
+- Added GPX file import support
+- Expanded airport fallback database to cover North America and Europe
+- Added Help modal with tabbed documentation
+- Added toggle for time-progressive weather forecasts
+- Always fetch ceiling data from ECMWF regardless of selected model
+- Auto-fetch weather when plugin opens with existing route
+- Removed floating window mode (panel mode only)
+- Elevation API request batching for long routes
+
 ### v0.9.9
 - VFR Window Finder to scan forecast for best departure times
 - Airport search by ICAO code with runway data
@@ -150,7 +165,7 @@ npm run build
 
 ## License
 
-ISC License
+MIT License
 
 ## Author
 
