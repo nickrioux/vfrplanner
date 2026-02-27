@@ -59,7 +59,7 @@
         >
             <input
                 type="file"
-                accept=".fpl,.xml,.gpx"
+                accept=".fpl,.xml,.gpx,application/xml,text/xml,application/gpx+xml,*/*"
                 on:change={handleFileSelect}
                 bind:this={fileInput}
                 style="display: none"

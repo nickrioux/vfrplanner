@@ -2,7 +2,7 @@
 
 Your pre-flight weather window assistant. A Windy plugin for VFR flight planning with flight plan import, weather integration, and altitude profile visualization.
 
-![Version](https://img.shields.io/badge/version-1.0.2-blue)
+![Version](https://img.shields.io/badge/version-1.0.3-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -119,6 +119,10 @@ npm run build
 ```
 
 ## Changelog
+
+### v1.0.3
+- Fixed .fpl file import on iPad/iOS by adding MIME types to file input accept attribute
+- Upgraded @windycom/plugin-devtools to 3.0.3
 
 ### v1.0.2
 - Fixed Windy GL renderer compatibility for map layer removal
