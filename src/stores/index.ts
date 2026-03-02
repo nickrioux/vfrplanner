@@ -6,3 +6,4 @@
 export * from './routeStore';
 export * from './weatherStore';
 export * from './settingsStore';
+export * from './uiStore';

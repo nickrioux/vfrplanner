@@ -305,33 +305,35 @@ export async function fetchWaypointWeather(
         let usedPressureLevel = 'surface';
         let verticalWinds: LevelWind[] = [];
 
+        // Compute effective timestamp for time-based lookups
+        const windyTimestamp = store.get('timestamp') as number;
+        const effectiveTimestamp = targetTimestamp ?? windyTimestamp ?? Date.now();
+
         // Fetch meteogram data for vertical wind levels
         logger.debug(`[Weather] Fetching meteogram for ${waypointName}, altitude=${altitude}...`);
-        const meteogramData = await fetchVerticalWindData(lat, lon, true); // Always log for debugging
+        const meteogramResult = await fetchVerticalWindData(lat, lon, true); // Always log for debugging
+        const meteogramData = meteogramResult?.data || null;
+        const meteogramTimestamps = meteogramResult?.timestamps;
         logger.debug(`[Weather] Meteogram result for ${waypointName}:`, meteogramData ? `${Object.keys(meteogramData).length} keys` : 'NULL');
 
         if (meteogramData) {
-            // Get all wind levels
-            verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, 0, true); // Always log for debugging
-            logger.debug(`[Weather] Extracted ${verticalWinds.length} vertical wind levels`);
-
-            if (enableLogging && waypointName) {
-                logger.debug(`[Weather] Vertical winds for ${waypointName}:`, verticalWinds.map(w =>
-                    `${w.level}(${w.altitudeFeet}ft): ${Math.round(w.windDir)}°@${Math.round(w.windSpeed)}kt`
-                ).join(', '));
+            // Compute the correct time index for the meteogram data
+            let meteogramTimeIndex = 0;
+            if (meteogramTimestamps && meteogramTimestamps.length > 0) {
+                const meteogramInterp = getInterpolationIndices(meteogramTimestamps, effectiveTimestamp);
+                meteogramTimeIndex = meteogramInterp.lowerIndex;
             }
 
-            // Try to get altitude-specific wind
+            // Get all wind levels at the correct time index
+            verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, meteogramTimeIndex, enableLogging);
+
+            // Try to get altitude-specific wind at the correct time index
             if (altitude !== undefined && altitude > 0) {
-                const altitudeWind = getWindAtAltitudeFromMeteogram(meteogramData, altitude, 0, enableLogging);
+                const altitudeWind = getWindAtAltitudeFromMeteogram(meteogramData, altitude, meteogramTimeIndex, enableLogging);
                 if (altitudeWind) {
                     windSpeed = altitudeWind.windSpeed;
                     windDir = altitudeWind.windDir;
                     usedPressureLevel = altitudeWind.level;
-
-                    if (enableLogging && waypointName) {
-                        logger.debug(`[Weather] ✓ Wind at ${altitude}ft for ${waypointName}: ${Math.round(windDir)}° @ ${Math.round(windSpeed)}kt (level: ${usedPressureLevel})`);
-                    }
                 }
             }
         }
@@ -466,7 +468,7 @@ export async function fetchWaypointWeather(
 
         if (cbaseSource === 'meteogram' && meteogramData) {
             // Meteogram has its own timestamps
-            cbaseTimestamps = meteogramData.ts || meteogramData['ts-surface'];
+            cbaseTimestamps = meteogramTimestamps || meteogramData.ts || meteogramData['ts-surface'];
             timestamps = responseData.ts || responseData['ts-surface'] || cbaseTimestamps || [];
         } else if (cbaseSource === 'ecmwf-separate' && ecmwfCbaseTimestamps) {
             // Use ECMWF timestamps for cbase interpolation
@@ -490,11 +492,7 @@ export async function fetchWaypointWeather(
             return null;
         }
 
-        // Use target timestamp if provided, otherwise use Windy's current timestamp
-        const windyTimestamp = store.get('timestamp') as number;
-        const effectiveTimestamp = targetTimestamp ?? windyTimestamp ?? Date.now();
-
-        // Interpolate to get values at the target time
+        // Interpolate to get values at the target time (effectiveTimestamp computed above)
         const interp = getInterpolationIndices(timestamps, effectiveTimestamp);
         const { lowerIndex, upperIndex, fraction, needsInterpolation } = interp;
 
@@ -941,9 +939,10 @@ export async function fetchFullForecast(
         let verticalWinds: LevelWind[] = [];
 
         try {
-            meteogramData = await fetchVerticalWindData(lat, lon, false);
-            if (meteogramData) {
-                meteogramTimestamps = meteogramData.ts || meteogramData['ts-surface'];
+            const meteogramResult = await fetchVerticalWindData(lat, lon, false);
+            if (meteogramResult) {
+                meteogramData = meteogramResult.data;
+                meteogramTimestamps = meteogramResult.timestamps;
                 verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, 0, false);
             }
         } catch (meteogramError) {
