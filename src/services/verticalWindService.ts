@@ -16,19 +16,25 @@ export interface LevelWind {
     windDir: number;        // degrees
 }
 
+/** Result from fetchVerticalWindData including timestamps */
+export interface VerticalWindResult {
+    data: NonNullable<WindyMeteogramData>;
+    timestamps: number[] | undefined;
+}
+
 /**
  * Fetches vertical wind data for all pressure levels using getMeteogramForecastData with extended: 'true'
  * This is the approach used by the flyxc windy-sounding plugin
  * @param lat - Latitude
  * @param lon - Longitude
  * @param enableLogging - Enable debug logging
- * @returns Object with wind data at each pressure level (windU-XXXh, windV-XXXh keys)
+ * @returns Object with wind data at each pressure level (windU-XXXh, windV-XXXh keys) and timestamps
  */
 export async function fetchVerticalWindData(
     lat: number,
     lon: number,
     enableLogging: boolean = false
-): Promise<WindyMeteogramData | null> {
+): Promise<VerticalWindResult | null> {
     try {
         // Log the request parameters
         const requestParams = {
@@ -81,7 +87,38 @@ export async function fetchVerticalWindData(
             logger.debug(`[Weather] ========================================================`);
         }
 
-        return result?.data?.data || null;
+        const data = result?.data?.data;
+        if (!data) return null;
+
+        // Extract timestamps from all possible locations in Windy's response:
+        //   data.hours (most common for meteogram), data.ts, data['ts-surface'],
+        //   result.data.ts, result.data.hours
+        let rawTimestamps: number[] | undefined =
+            data.hours as number[] ||
+            data.ts as number[] ||
+            data['ts-surface'] as number[] ||
+            (result?.data as any)?.hours ||
+            (result?.data as any)?.ts;
+
+        // Windy meteogram 'hours' may be in seconds — convert to milliseconds if needed
+        let timestamps: number[] | undefined;
+        if (rawTimestamps && rawTimestamps.length > 0) {
+            // Heuristic: if first timestamp < 1e12, it's in seconds (before year 2001 in ms)
+            if (rawTimestamps[0] < 1e12) {
+                timestamps = rawTimestamps.map(t => t * 1000);
+                if (enableLogging) {
+                    logger.debug(`[Weather] Converted meteogram timestamps from seconds to ms`);
+                }
+            } else {
+                timestamps = rawTimestamps;
+            }
+        }
+
+        if (enableLogging) {
+            logger.debug(`[Weather] Meteogram timestamps: ${timestamps ? `${timestamps.length} entries, first=${timestamps[0] ? new Date(timestamps[0]).toISOString() : 'N/A'}, last=${timestamps[timestamps.length - 1] ? new Date(timestamps[timestamps.length - 1]).toISOString() : 'N/A'}` : 'NOT FOUND'}`);
+        }
+
+        return { data, timestamps };
     } catch (error) {
         logger.error('[Weather] Error fetching vertical wind data:', error);
         if (enableLogging) {

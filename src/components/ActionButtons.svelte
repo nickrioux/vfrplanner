@@ -98,7 +98,7 @@
     </div>
 </div>
 
-<style>
+<style lang="less">
     .action-buttons {
         display: flex;
         flex-direction: column;

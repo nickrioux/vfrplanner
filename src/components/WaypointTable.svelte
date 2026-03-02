@@ -34,12 +34,13 @@
         deleteWaypoint: string;
     }>();
 
-    // Helper functions
-    function getWaypointWeather(waypointId: string): WaypointWeather | undefined {
+    // Reactive lookups — passing the Map as a parameter forces Svelte to
+    // re-evaluate when the Map reference changes (after weather re-fetch)
+    function getWaypointWeather(waypointId: string, _data: Map<string, WaypointWeather> = weatherData): WaypointWeather | undefined {
         return weatherData.get(waypointId);
     }
 
-    function getWaypointAlerts(waypointId: string): WeatherAlert[] {
+    function getWaypointAlerts(waypointId: string, _data: Map<string, WeatherAlert[]> = weatherAlerts): WeatherAlert[] {
         return weatherAlerts.get(waypointId) || [];
     }
 
@@ -97,8 +98,8 @@
     </div>
     <div class="waypoint-table">
         {#each flightPlan.waypoints as wp, index (wp.id)}
-            {@const wx = getWaypointWeather(wp.id)}
-            {@const alerts = getWaypointAlerts(wp.id)}
+            {@const wx = getWaypointWeather(wp.id, weatherData)}
+            {@const alerts = getWaypointAlerts(wp.id, weatherAlerts)}
             <div
                 class="waypoint-row"
                 class:selected={selectedWaypointId === wp.id}
@@ -281,7 +282,6 @@
     }
 
     .waypoint-table {
-        max-height: 350px;
         overflow-y: auto;
     }
 

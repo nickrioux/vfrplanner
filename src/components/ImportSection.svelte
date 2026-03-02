@@ -108,7 +108,7 @@
     {/if}
 </div>
 
-<style>
+<style lang="less">
     .import-section {
         padding: 10px;
     }

@@ -1,3 +1,137 @@
+{#if layoutMode === 'phone'}
+    <MobileLayout
+        {flightPlan}
+        {weatherData}
+        {weatherAlerts}
+        {settings}
+        {selectedWaypointId}
+        {editingWaypointId}
+        {isEditMode}
+        {isLoadingWeather}
+        {isLoading}
+        {error}
+        {forecastRange}
+        {departureTime}
+        {syncWithWindy}
+        {adjustForecastForFlightTime}
+        {isSearchingWindows}
+        {windowSearchProgress}
+        {windowSearchMinCondition}
+        {vfrWindows}
+        {windowSearchError}
+        {elevationProfile}
+        {maxProfileAltitude}
+        {profileScale}
+        on:readWeather={handleReadWeather}
+        on:reverseRoute={handleReverseRoute}
+        on:toggleEditMode={toggleEditMode}
+        on:exportGPX={handleExportGPX}
+        on:exportFPL={handleExportFPL}
+        on:sendToDistancePlanning={handleSendToDistancePlanning}
+        on:clearFlightPlan={clearFlightPlan}
+        on:createNewFlightPlan={createNewFlightPlan}
+        on:selectWaypoint={(e) => selectWaypoint(e.detail)}
+        on:deleteWaypoint={(e) => deleteWaypoint(e.detail)}
+        on:moveWaypointUp={(e) => moveWaypointUp(e.detail)}
+        on:moveWaypointDown={(e) => moveWaypointDown(e.detail)}
+        on:departureTimeChange={handleDepartureTimeChange}
+        on:syncToggle={toggleWindySync}
+        on:findWindows={handleFindVFRWindows}
+        on:useWindow={(e) => useVFRWindow(e.detail)}
+        on:minConditionChange={(e) => vfrWindowStore.setMinCondition(e.detail)}
+        on:waypointClick={(e) => selectWaypointById(e.detail)}
+        on:fileSelect={async (e) => { await loadFile(e.detail); }}
+        on:settingsChange={handleSettingsChange}
+        on:presetChange={handlePresetChange}
+        on:conditionsSave={handleConditionsSave}
+        on:conditionsCancel={handleConditionsCancel}
+        on:profileAltitudeChange={handleProfileAltitudeChange}
+        on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
+        on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
+        on:cancelEditWaypointName={() => editingWaypointId = null}
+        on:startEditWaypointAltitude={(e) => startEditWaypointAltitude(e.detail)}
+        on:finishEditWaypointAltitude={(e) => finishEditWaypointAltitude(e.detail.waypointId, e.detail.newAltitude)}
+        on:cancelEditWaypointAltitude={() => editingWaypointAltitudeId = null}
+    />
+{:else if layoutMode === 'tablet'}
+    <TabletLayout
+        {flightPlan}
+        {weatherData}
+        {weatherAlerts}
+        {settings}
+        {selectedWaypointId}
+        {editingWaypointId}
+        editingWaypointAltitudeId={editingWaypointAltitudeId}
+        {isEditMode}
+        {isLoadingWeather}
+        {isLoading}
+        {error}
+        {forecastRange}
+        {departureTime}
+        {syncWithWindy}
+        {adjustForecastForFlightTime}
+        {isSearchingWindows}
+        {windowSearchProgress}
+        {windowSearchMinCondition}
+        {vfrWindows}
+        {windowSearchError}
+        {elevationProfile}
+        {maxProfileAltitude}
+        {profileScale}
+        {weatherError}
+        {weatherModelWarning}
+        {showSearchPanel}
+        {searchQuery}
+        {searchResults}
+        {isSearching}
+        {searchError}
+        {showExportMenu}
+        {editingPlanName}
+        ceilingDataReliable={true}
+        version={config.version}
+        on:readWeather={handleReadWeather}
+        on:reverseRoute={handleReverseRoute}
+        on:toggleEditMode={toggleEditMode}
+        on:exportGPX={handleExportGPX}
+        on:exportFPL={handleExportFPL}
+        on:sendToDistancePlanning={handleSendToDistancePlanning}
+        on:clearFlightPlan={clearFlightPlan}
+        on:createNewFlightPlan={createNewFlightPlan}
+        on:selectWaypoint={(e) => selectWaypoint(e.detail)}
+        on:deleteWaypoint={(e) => deleteWaypoint(e.detail)}
+        on:moveWaypointUp={(e) => moveWaypointUp(e.detail)}
+        on:moveWaypointDown={(e) => moveWaypointDown(e.detail)}
+        on:departureTimeChange={handleDepartureTimeChange}
+        on:syncToggle={toggleWindySync}
+        on:findWindows={handleFindVFRWindows}
+        on:useWindow={(e) => useVFRWindow(e.detail)}
+        on:minConditionChange={(e) => vfrWindowStore.setMinCondition(e.detail)}
+        on:waypointClick={(e) => selectWaypointById(e.detail)}
+        on:fileSelect={async (e) => { await loadFile(e.detail); }}
+        on:settingsChange={handleSettingsChange}
+        on:presetChange={handlePresetChange}
+        on:openConditionsModal={handleOpenConditionsModal}
+        on:conditionsSave={handleConditionsSave}
+        on:conditionsCancel={handleConditionsCancel}
+        on:profileAltitudeChange={handleProfileAltitudeChange}
+        on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
+        on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
+        on:cancelEditWaypointName={() => editingWaypointId = null}
+        on:startEditWaypointAltitude={(e) => startEditWaypointAltitude(e.detail)}
+        on:finishEditWaypointAltitude={(e) => finishEditWaypointAltitude(e.detail.waypointId, e.detail.newAltitude)}
+        on:cancelEditWaypointAltitude={() => editingWaypointAltitudeId = null}
+        on:toggleSearchPanel={toggleSearchPanel}
+        on:search={handleSearch}
+        on:addAirport={(e) => addAirportToFlightPlan(e.detail)}
+        on:addNavaid={(e) => addNavaidToFlightPlan(e.detail)}
+        on:searchQueryChange={(e) => searchQuery = e.detail}
+        on:showExportMenuChange={(e) => showExportMenu = e.detail}
+        on:startEditPlanName={startEditPlanName}
+        on:finishEditPlanName={(e) => finishEditPlanName(e.detail)}
+        on:toggleAdjustForecast={(e) => weatherStore.setAdjustForecastForFlightTime(e.detail)}
+    />
+{:else}
+<!-- Desktop layout (unchanged) -->
 <!-- Mobile header -->
 <div class="plugin__mobile-header">
     {title}
@@ -5,7 +139,6 @@
 
 <section
     class="plugin__content"
-    class:mobile={isMobile}
 >
     <!-- Panel mode title -->
     <div class="plugin__title-row">
@@ -361,6 +494,7 @@
         <HelpModal on:close={() => showHelpModal = false} />
     {/if}
 </section>
+{/if}
 
 <script lang="ts">
     import bcast from '@windy/broadcast';
@@ -421,6 +555,9 @@
         type DepartureTimeState,
     } from './stores/weatherStore';
     import { settingsStore } from './stores/settingsStore';
+    import { uiStore } from './stores/uiStore';
+    import MobileLayout from './components/mobile/MobileLayout.svelte';
+    import TabletLayout from './components/tablet/TabletLayout.svelte';
     import {
         initWeatherController,
         fetchWeatherForRoute,
@@ -514,9 +651,9 @@
     $: vfrWindows = $vfrWindowStore.windows;
     $: windowSearchError = $vfrWindowStore.error;
 
-    // Mobile detection state
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    let isMobile = isTouchDevice || window.innerWidth < 768;
+    // Layout mode from uiStore (replaces old isMobile/isTouchDevice)
+    $: layoutMode = $uiStore.layoutMode;
+    $: isCrosshairMode = $uiStore.isCrosshairMode;
 
     /**
      * Reset route panel state when flight plan changes
@@ -807,6 +944,8 @@
     }
 
     async function handleMapClick(latLon: LatLon) {
+        // Skip map click handler when crosshair mode is active (phone uses confirm button instead)
+        if (isCrosshairMode) return;
         if (!isEditMode || !flightPlan) return;
         await addWaypointFromMapClick(latLon.lat, latLon.lon);
     }
@@ -1289,22 +1428,18 @@
         }
     }
 
-    // Window resize handler for mobile detection
-    function handleWindowResize() {
-        isMobile = isTouchDevice || window.innerWidth < 768;
-    }
-
     onMount(() => {
         // Ensure controllers are initialized (may already be done by onopen)
         initializeControllers();
+
+        // Initialize UI store listeners (resize, orientation)
+        uiStore.init();
 
         singleclick.on(name, handleMapClick);
         // Listen to Windy's timeline changes
         store.on('timestamp', handleWindyTimestampChange);
         // Listen for keyboard shortcuts
         window.addEventListener('keydown', handleKeyDown);
-        // Listen for window resize to update mobile state
-        window.addEventListener('resize', handleWindowResize);
     });
 
     onDestroy(() => {
@@ -1314,8 +1449,8 @@
         store.off('timestamp', handleWindyTimestampChange);
         // Clean up keyboard listener
         window.removeEventListener('keydown', handleKeyDown);
-        // Clean up window resize listener
-        window.removeEventListener('resize', handleWindowResize);
+        // Clean up UI store listeners
+        uiStore.destroy();
         // Restore rhpane display if it was hidden
         const pluginRhpane = document.querySelector('.plugin-rhpane') as HTMLElement;
         if (pluginRhpane) {

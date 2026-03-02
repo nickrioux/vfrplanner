@@ -179,8 +179,11 @@ export async function fetchWeatherForRoute(): Promise<void> {
         );
         weatherStore.setWeatherAlerts(weatherAlerts);
 
-        // Fetch terrain elevation profile along the route
-        await fetchElevationProfile(flightPlan, settings);
+        // Fetch terrain elevation profile along the route (skip if already loaded — terrain doesn't change with time)
+        const existingProfile = weatherStore.getState().elevationProfile;
+        if (!existingProfile || existingProfile.length === 0) {
+            await fetchElevationProfile(flightPlan, settings);
+        }
 
         // Recalculate navigation with wind corrections
         recalculateWithWind(flightPlan, weatherData, settings);

@@ -92,7 +92,7 @@
     {/if}
 </div>
 
-<style>
+<style lang="less">
     .search-section {
         margin: 10px;
     }
