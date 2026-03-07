@@ -20,8 +20,10 @@
     import AltitudeProfile from '../AltitudeProfile.svelte';
     import SettingsPanel from '../SettingsPanel.svelte';
     import ConditionsModal from '../ConditionsModal.svelte';
+    import AircraftConfigModal from '../AircraftConfigModal.svelte';
     import AboutTab from '../AboutTab.svelte';
     import type { VfrConditionThresholds } from '../../types/conditionThresholds';
+    import type { AircraftPerformance } from '../../types/settings';
     import config from '../../pluginConfig';
 
     // Props
@@ -57,6 +59,7 @@
 
     let mobileActiveTab: 'route' | 'profile' | 'settings' | 'about' = 'route';
     let showConditionsModal = false;
+    let showAircraftConfig = false;
     let showExportMenu = false;
 
     function handleAddWaypoint() {
@@ -71,6 +74,15 @@
     function handleConditionsCancel() {
         dispatch('conditionsCancel');
         showConditionsModal = false;
+    }
+
+    function handleAircraftConfigSave(e: CustomEvent<AircraftPerformance>) {
+        dispatch('aircraftConfigSave', e.detail);
+        showAircraftConfig = false;
+    }
+
+    function handleAircraftConfigCancel() {
+        showAircraftConfig = false;
     }
 </script>
 
@@ -261,6 +273,7 @@
                             on:change={(e) => dispatch('settingsChange')}
                             on:profileAltitudeChange
                             on:openConditionsModal={() => showConditionsModal = true}
+                            on:configureAircraft={() => showAircraftConfig = true}
                             on:presetChange
                         />
                     {:else if mobileActiveTab === 'about' && flightPlan}
@@ -276,6 +289,13 @@
             thresholds={settings.customThresholds}
             on:save={handleConditionsSave}
             on:cancel={handleConditionsCancel}
+        />
+
+        <AircraftConfigModal
+            visible={showAircraftConfig}
+            performance={settings.aircraftPerformance}
+            on:save={handleAircraftConfigSave}
+            on:cancel={handleAircraftConfigCancel}
         />
     {/if}
 </div>

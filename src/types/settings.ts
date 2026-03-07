@@ -5,6 +5,24 @@
 import type { VfrConditionThresholds, ConditionPreset, AircraftCategory, Region } from './conditionThresholds';
 import { STANDARD_THRESHOLDS } from './conditionThresholds';
 
+export interface AircraftPerformance {
+    cruiseTAS: number;        // True Airspeed in knots
+    cruiseAltitude: number;   // Cruise altitude ft MSL
+    rateOfClimb: number;      // fpm
+    rateOfDescent: number;    // fpm
+    climbSpeed: number;       // KIAS
+    descentSpeed: number;     // KIAS
+}
+
+export const DEFAULT_AIRCRAFT_PERFORMANCE: AircraftPerformance = {
+    cruiseTAS: 100,
+    cruiseAltitude: 3000,
+    rateOfClimb: 500,
+    rateOfDescent: 500,
+    climbSpeed: 80,
+    descentSpeed: 90,
+};
+
 // Re-export aircraft/region types for convenience
 export type { AircraftCategory, Region };
 
@@ -41,9 +59,17 @@ export interface PluginSettings {
     conditionPreset: ConditionPreset;
     customThresholds: VfrConditionThresholds;
 
+    // Route weather sampling
+    weatherSampleEnabled: boolean;    // Opt-in route weather sampling
+    weatherSampleInterval: number;    // NM between samples (5-50)
+    weatherSampleShowDots: boolean;   // Debug: show sample points on map
+
     // Aircraft category and region
     aircraftCategory: AircraftCategory;
     region: Region;
+
+    // Aircraft performance
+    aircraftPerformance: AircraftPerformance;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -61,6 +87,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     speedUnit: 'kt',
     conditionPreset: 'standard',
     customThresholds: { ...STANDARD_THRESHOLDS },
+    weatherSampleEnabled: false,
+    weatherSampleInterval: 15,
+    weatherSampleShowDots: false,
     aircraftCategory: 'airplane',
     region: 'canada',
+    aircraftPerformance: { ...DEFAULT_AIRCRAFT_PERFORMANCE },
 };
