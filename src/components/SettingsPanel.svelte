@@ -15,6 +15,7 @@
         change: void;
         profileAltitudeChange: number;
         openConditionsModal: void;
+        configureAircraft: void;
         presetChange: ConditionPreset;
     }>();
 
@@ -48,23 +49,7 @@
         handleChange();
     }
 
-    function handleAirspeedChange(e: Event) {
-        const value = parseInt((e.target as HTMLInputElement).value, 10);
-        if (!isNaN(value)) {
-            settingsStore.setDefaultAirspeed(value);
-            handleChange();
-        }
-    }
-
-    function handleAltitudeChange(e: Event) {
-        const value = parseInt((e.target as HTMLInputElement).value, 10);
-        if (!isNaN(value)) {
-            settingsStore.setDefaultAltitude(value);
-            handleChange();
-        }
-    }
-
-    function handleAutoTerrainChange(e: Event) {
+function handleAutoTerrainChange(e: Event) {
         const checked = (e.target as HTMLInputElement).checked;
         settingsStore.setAutoTerrainElevation(checked);
         handleChange();
@@ -104,210 +89,274 @@
         handleChange();
     }
 
-    function handleEnableLoggingChange(e: Event) {
+function handleWeatherSampleEnabledChange(e: Event) {
         const checked = (e.target as HTMLInputElement).checked;
-        settingsStore.setEnableLogging(checked);
+        settingsStore.setWeatherSampleEnabled(checked);
         handleChange();
     }
 
+    function handleWeatherSampleShowDotsChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setWeatherSampleShowDots(checked);
+        handleChange();
+    }
+
+    function handleWeatherSampleIntervalChange(e: Event) {
+        const value = parseInt((e.target as HTMLInputElement).value, 10);
+        if (!isNaN(value)) {
+            settingsStore.setWeatherSampleInterval(value);
+            handleChange();
+        }
+    }
+
     $: totalDistance = flightPlan?.totals.distance || 0;
-    $: estimatedSamples = Math.ceil(totalDistance / settings.terrainSampleInterval) + (flightPlan?.waypoints.length || 0);
+    $: estimatedWeatherSamples = settings.weatherSampleEnabled && totalDistance > 0
+        ? Math.max(0, Math.ceil(totalDistance / settings.weatherSampleInterval) - 1)
+        : 0;
 </script>
 
 <div class="settings-section">
-    <div class="setting-group">
-        <label class="setting-label">Aircraft Category</label>
-        <div class="setting-input">
-            <select value={settings.aircraftCategory} on:change={handleAircraftCategoryChange}>
-                <option value="airplane">Airplane</option>
-                <option value="helicopter">Helicopter</option>
-            </select>
-        </div>
-        <div class="setting-description">
-            Helicopters have lower visibility minimums than airplanes.
-        </div>
-    </div>
+    <!-- Aircraft & Regulations -->
+    <details class="settings-group" open>
+        <summary class="settings-group-header">Aircraft & Regulations</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-label">Aircraft Category</label>
+                <div class="setting-input">
+                    <select value={settings.aircraftCategory} on:change={handleAircraftCategoryChange}>
+                        <option value="airplane">Airplane</option>
+                        <option value="helicopter">Helicopter</option>
+                    </select>
+                </div>
+                {#if settings.aircraftCategory === 'helicopter'}
+                    <div class="setting-description">
+                        Helicopters have lower visibility minimums than airplanes.
+                    </div>
+                {/if}
+            </div>
 
-    <div class="setting-group">
-        <label class="setting-label">Regulatory Region</label>
-        <div class="setting-input">
-            <select value={settings.region} on:change={handleRegionChange}>
-                <option value="canada">Canada (TC)</option>
-                <option value="usa">USA (FAA)</option>
-                <option value="europe">Europe (EASA)</option>
-            </select>
+            <div class="setting-group">
+                <label class="setting-label">Regulatory Region</label>
+                <div class="setting-input">
+                    <select value={settings.region} on:change={handleRegionChange}>
+                        <option value="canada">Canada (TC)</option>
+                        <option value="usa">USA (FAA)</option>
+                        <option value="europe">Europe (EASA)</option>
+                    </select>
+                </div>
+                {#if settings.aircraftCategory === 'helicopter'}
+                    <div class="setting-description">
+                        Helicopter VFR minimums: Canada 1.0 SM, USA 0.5 SM, Europe 800m.
+                    </div>
+                {/if}
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-label">Aircraft Performance</label>
+                <div class="setting-description">
+                    TAS {settings.aircraftPerformance?.cruiseTAS ?? 100}kt, Alt {settings.aircraftPerformance?.cruiseAltitude ?? 3000}ft, ROC {settings.aircraftPerformance?.rateOfClimb ?? 500}fpm, ROD {settings.aircraftPerformance?.rateOfDescent ?? 500}fpm
+                </div>
+                <button class="customize-btn" on:click={() => dispatch('configureAircraft')}>
+                    Configure...
+                </button>
+            </div>
         </div>
-        <div class="setting-description">
-            {#if settings.aircraftCategory === 'helicopter'}
-                Helicopter VFR minimums: Canada 1.0 SM, USA 0.5 SM, Europe 800m.
-            {:else}
-                Affects VFR minimums for profile condition evaluation.
+    </details>
+
+    <!-- VFR Conditions -->
+    <details class="settings-group" open>
+        <summary class="settings-group-header">VFR Conditions</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-label">VFR Condition Thresholds</label>
+                <div class="setting-input">
+                    <select bind:value={conditionPreset} on:change={handlePresetChange}>
+                        <option value="standard">Standard VFR</option>
+                        <option value="conservative">Conservative</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="setting-description">
+                    Defines ceiling, visibility, wind and clearance limits for profile coloring.
+                    {#if settings.aircraftCategory === 'helicopter' && conditionPreset !== 'custom'}
+                        <br/><em>Using {settings.region === 'canada' ? 'Canadian' : settings.region === 'usa' ? 'US' : 'European'} helicopter minimums.</em>
+                    {/if}
+                </div>
+                <button class="customize-btn" on:click={handleOpenModal}>
+                    Customize...
+                </button>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={settings.includeNightFlights}
+                        on:change={handleIncludeNightFlightsChange}
+                    />
+                    Include night hours in VFR window search
+                </label>
+                <div class="setting-description">
+                    When disabled, VFR windows are limited to 30 min before sunrise to 30 min after sunset.
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-label">Max VFR Windows to Find</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        value={settings.maxVFRWindows}
+                        on:change={handleMaxVFRWindowsChange}
+                        min="1"
+                        max="50"
+                    />
+                </div>
+            </div>
+        </div>
+    </details>
+
+    <!-- Route Sampling -->
+    <details class="settings-group" open>
+        <summary class="settings-group-header">Route Sampling</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-label">Terrain Sample Interval</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        value={settings.terrainSampleInterval}
+                        on:change={handleTerrainIntervalChange}
+                        min="1"
+                        max="10"
+                        step="0.5"
+                    />
+                    <span class="unit">NM</span>
+                </div>
+                <div class="setting-description">
+                    Lower = finer terrain detail.
+                </div>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={settings.weatherSampleEnabled}
+                        on:change={handleWeatherSampleEnabledChange}
+                    />
+                    Sample weather along entire route
+                </label>
+                <div class="setting-description">
+                    Fetch weather at intermediate points between waypoints for better en-route alert coverage.
+                </div>
+            </div>
+
+            {#if settings.weatherSampleEnabled}
+                <div class="setting-group">
+                    <label class="setting-label">Weather Sample Interval</label>
+                    <div class="setting-input">
+                        <input
+                            type="number"
+                            value={settings.weatherSampleInterval}
+                            on:change={handleWeatherSampleIntervalChange}
+                            min="5"
+                            max="50"
+                            step="5"
+                        />
+                        <span class="unit">NM</span>
+                    </div>
+                    <div class="setting-description">
+                        Lower = more weather detail.
+                        {#if estimatedWeatherSamples > 0}
+                            <br/>~{estimatedWeatherSamples} intermediate weather samples
+                        {/if}
+                    </div>
+                </div>
             {/if}
         </div>
-    </div>
+    </details>
 
-    <div class="setting-divider"></div>
+    <!-- Display -->
+    <details class="settings-group" open>
+        <summary class="settings-group-header">Display</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-label">Profile Top Height</label>
+                <div class="setting-input">
+                    <input
+                        type="number"
+                        bind:value={maxProfileAltitude}
+                        on:input={handleProfileAltitudeChange}
+                        min="1000"
+                        max="60000"
+                        step="1000"
+                    />
+                    <span class="unit">ft MSL</span>
+                </div>
+            </div>
 
-    <div class="setting-group">
-        <label class="setting-label">VFR Condition Thresholds</label>
-        <div class="setting-input">
-            <select bind:value={conditionPreset} on:change={handlePresetChange}>
-                <option value="standard">Standard VFR</option>
-                <option value="conservative">Conservative</option>
-                <option value="custom">Custom</option>
-            </select>
-        </div>
-        <div class="setting-description">
-            Defines ceiling, visibility, wind and clearance limits for profile coloring.
-            {#if settings.aircraftCategory === 'helicopter' && conditionPreset !== 'custom'}
-                <br/><em>Using {settings.region === 'canada' ? 'Canadian' : settings.region === 'usa' ? 'US' : 'European'} helicopter minimums.</em>
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={settings.showLabels}
+                        on:change={handleShowLabelsChange}
+                    />
+                    Show waypoint labels on map
+                </label>
+            </div>
+
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={settings.autoTerrainElevation}
+                        on:change={handleAutoTerrainChange}
+                    />
+                    Auto terrain elevation for departure/arrival
+                </label>
+                <div class="setting-description">
+                    Auto-set field elevation for departure/arrival.
+                </div>
+            </div>
+
+            {#if settings.weatherSampleEnabled}
+                <div class="setting-group">
+                    <label class="setting-checkbox">
+                        <input
+                            type="checkbox"
+                            checked={settings.weatherSampleShowDots}
+                            on:change={handleWeatherSampleShowDotsChange}
+                        />
+                        Show weather sample markers
+                    </label>
+                </div>
             {/if}
         </div>
-        <button class="customize-btn" on:click={handleOpenModal}>
-            Customize...
-        </button>
-    </div>
+    </details>
 
-    <div class="setting-divider"></div>
-
-    <div class="setting-group">
-        <label class="setting-label">Default Airspeed (TAS)</label>
-        <div class="setting-input">
-            <input
-                type="number"
-                value={settings.defaultAirspeed}
-                on:change={handleAirspeedChange}
-                min="50"
-                max="500"
-            />
-            <span class="unit">kt</span>
+    <!-- Data Sources -->
+    <details class="settings-group" open>
+        <summary class="settings-group-header">Data Sources</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-label">AirportDB API Key (Optional)</label>
+                <input
+                    type="password"
+                    class="setting-input api-key-input"
+                    value={settings.airportdbApiKey}
+                    on:change={handleApiKeyChange}
+                    placeholder="Optional - offline data available"
+                />
+                <div class="setting-description">
+                    <strong>Without API key:</strong> Offline data for large/medium airports in North America and Europe (from <a href="https://ourairports.com" target="_blank" rel="noopener">OurAirports</a>).<br/>
+                    <strong>With API key:</strong> Global coverage + navaids. Get a free key at
+                    <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
+                </div>
+            </div>
         </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-label">Default Altitude</label>
-        <div class="setting-input">
-            <input
-                type="number"
-                value={settings.defaultAltitude}
-                on:change={handleAltitudeChange}
-                min="0"
-                max="45000"
-                step="500"
-            />
-            <span class="unit">ft</span>
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-checkbox">
-            <input
-                type="checkbox"
-                checked={settings.autoTerrainElevation}
-                on:change={handleAutoTerrainChange}
-            />
-            Auto terrain elevation for departure/arrival
-        </label>
-        <div class="setting-description">
-            Automatically fetch terrain elevation for first and last waypoints when importing or creating a flight plan.
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-checkbox">
-            <input
-                type="checkbox"
-                checked={settings.showLabels}
-                on:change={handleShowLabelsChange}
-            />
-            Show waypoint labels on map
-        </label>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-checkbox">
-            <input
-                type="checkbox"
-                checked={settings.includeNightFlights}
-                on:change={handleIncludeNightFlightsChange}
-            />
-            Include night hours in VFR window search
-        </label>
-        <div class="setting-description">
-            When disabled, VFR windows are limited to 30 min before sunrise to 30 min after sunset.
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-label">Max VFR Windows to Find</label>
-        <div class="setting-input">
-            <input
-                type="number"
-                value={settings.maxVFRWindows}
-                on:change={handleMaxVFRWindowsChange}
-                min="1"
-                max="50"
-            />
-        </div>
-        <div class="setting-description">
-            Maximum number of VFR windows to find across the forecast period (up to 10 days).
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-label">Terrain Sample Interval</label>
-        <div class="setting-input">
-            <input
-                type="number"
-                value={settings.terrainSampleInterval}
-                on:change={handleTerrainIntervalChange}
-                min="1"
-                max="10"
-                step="0.5"
-            />
-            <span class="unit">NM</span>
-        </div>
-        <div class="setting-description">
-            Distance between terrain elevation samples. Lower = more detail, but slower.
-            <br/>Current: {settings.terrainSampleInterval} NM interval will fetch ~{estimatedSamples} elevation points
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-label">Profile Top Height</label>
-        <div class="setting-input">
-            <input
-                type="number"
-                bind:value={maxProfileAltitude}
-                on:input={handleProfileAltitudeChange}
-                min="1000"
-                max="60000"
-                step="1000"
-            />
-            <span class="unit">ft MSL</span>
-        </div>
-        <div class="setting-description">
-            Maximum altitude displayed on the altitude profile graph.
-        </div>
-    </div>
-
-    <div class="setting-group">
-        <label class="setting-label">AirportDB API Key (Optional)</label>
-        <input
-            type="password"
-            class="setting-input api-key-input"
-            value={settings.airportdbApiKey}
-            on:change={handleApiKeyChange}
-            placeholder="Optional - offline data available"
-        />
-        <div class="setting-description">
-            <strong>Without API key:</strong> Offline data for large/medium airports in North America and Europe (from <a href="https://ourairports.com" target="_blank" rel="noopener">OurAirports</a>).<br/>
-            <strong>With API key:</strong> Global coverage + navaids. Get a free key at
-            <a href="https://airportdb.io" target="_blank" rel="noopener">airportdb.io</a>
-        </div>
-    </div>
-
-
+    </details>
 </div>
 
 <style lang="less">
@@ -315,8 +364,56 @@
         padding: 10px;
     }
 
+    .settings-group {
+        margin-bottom: 4px;
+        border: 1px solid #333;
+        border-radius: 6px;
+        overflow: hidden;
+
+        &[open] > .settings-group-header::after {
+            transform: rotate(90deg);
+        }
+    }
+
+    .settings-group-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 12px;
+        font-weight: 600;
+        font-size: 13px;
+        color: #ccc;
+        background: #1e1e1e;
+        cursor: pointer;
+        user-select: none;
+        list-style: none;
+
+        &::-webkit-details-marker {
+            display: none;
+        }
+
+        &::after {
+            content: '\25B6';
+            font-size: 9px;
+            color: #666;
+            transition: transform 0.15s ease;
+        }
+
+        &:hover {
+            background: #252525;
+        }
+    }
+
+    .settings-group-content {
+        padding: 10px 12px;
+    }
+
     .setting-group {
         margin-bottom: 15px;
+
+        &:last-child {
+            margin-bottom: 5px;
+        }
     }
 
     .setting-label {
@@ -417,19 +514,6 @@
         }
     }
 
-    .setting-info {
-        margin-top: 20px;
-        padding: 10px;
-        background: #1a1a1a;
-        border-radius: 4px;
-
-        p {
-            margin: 0;
-            font-size: 12px;
-            color: #888;
-        }
-    }
-
     .customize-btn {
         margin-top: 8px;
         padding: 6px 12px;
@@ -453,11 +537,5 @@
             outline: 2px solid rgba(74, 144, 217, 0.5);
             outline-offset: 2px;
         }
-    }
-
-    .setting-divider {
-        height: 1px;
-        background: #333;
-        margin: 15px 0;
     }
 </style>
