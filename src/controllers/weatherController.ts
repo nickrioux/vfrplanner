@@ -27,6 +27,7 @@ import {
 } from '../services/weatherService';
 
 import { fetchRouteElevationProfile } from '../services/elevationService';
+import { fetchRouteWeatherSamples, computeRouteWeatherAlerts, evaluateRouteWeatherConditions, clearRouteWeatherCache } from '../services/routeWeatherSamplingService';
 import { findVFRWindows, type VFRWindow } from '../services/vfrWindowService';
 import { getActiveThresholds } from '../services/vfrConditionRules';
 import { calculateGroundSpeed, calculateHeadwindComponent } from '../services/navigationCalc';
@@ -49,6 +50,13 @@ export interface WeatherControllerDeps {
 }
 
 let deps: WeatherControllerDeps | null = null;
+
+/**
+ * Generation counter — incremented on each fetchWeatherForRoute() call.
+ * After any async gap, check whether a newer fetch has started; if so,
+ * discard the stale results to avoid overwriting fresher data.
+ */
+let fetchGeneration = 0;
 
 /**
  * Initialize the weather controller with dependencies
@@ -82,6 +90,8 @@ export async function fetchWeatherForRoute(): Promise<void> {
         logger.debug('[WeatherController] No flight plan, skipping weather fetch');
         return;
     }
+
+    const thisGeneration = ++fetchGeneration;
 
     weatherStore.setLoading(true);
     weatherStore.setError(null);
@@ -162,7 +172,15 @@ export async function fetchWeatherForRoute(): Promise<void> {
         });
 
         const weatherData = await Promise.race([weatherFetchPromise, overallTimeout]);
+
+        // A newer fetch was started while we were waiting — discard these results
+        if (thisGeneration !== fetchGeneration) {
+            logger.debug('[WeatherController] Stale fetch discarded (generation mismatch)');
+            return;
+        }
+
         weatherStore.setWeatherData(weatherData);
+        onMapUpdate?.(); // Update map as soon as weather data arrives
 
         if (settings.enableLogging) {
             logger.debug(
@@ -183,10 +201,64 @@ export async function fetchWeatherForRoute(): Promise<void> {
         const existingProfile = weatherStore.getState().elevationProfile;
         if (!existingProfile || existingProfile.length === 0) {
             await fetchElevationProfile(flightPlan, settings);
+
+            if (thisGeneration !== fetchGeneration) {
+                logger.debug('[WeatherController] Stale fetch discarded after elevation profile');
+                return;
+            }
         }
 
         // Recalculate navigation with wind corrections
         recalculateWithWind(flightPlan, weatherData, settings);
+
+        // Route weather sampling (runs after main weather, independent error boundary)
+        if (settings.weatherSampleEnabled && flightPlan.waypoints.length >= 2) {
+            try {
+                weatherStore.setRouteSamplingError(null);
+
+                const samples = await fetchRouteWeatherSamples(
+                    flightPlan.waypoints,
+                    settings.weatherSampleInterval,
+                    departureTime,
+                    settings.defaultAirspeed,
+                    plannedAltitude,
+                    pluginName,
+                    settings.enableLogging,
+                );
+
+                // Discard if a newer fetch started during sampling
+                if (thisGeneration !== fetchGeneration) {
+                    logger.debug('[WeatherController] Stale route sampling discarded (generation mismatch)');
+                    return;
+                }
+
+                weatherStore.setRouteWeatherSamples(samples);
+
+                const routeAlerts = computeRouteWeatherAlerts(samples, plannedAltitude);
+                weatherStore.setRouteWeatherAlerts(routeAlerts);
+
+                // Pre-compute VFR conditions so the map controller doesn't
+                // have to recalculate on every repaint.
+                const thresholds = getActiveThresholds(settings);
+                const conditions = evaluateRouteWeatherConditions(samples, plannedAltitude, thresholds);
+                weatherStore.setRouteWeatherConditions(conditions);
+                onMapUpdate?.(); // Update map with route weather conditions
+
+                if (settings.enableLogging) {
+                    logger.debug(
+                        `[WeatherController] Route sampling: ${samples.length} samples, ${routeAlerts.length} alerts`
+                    );
+                }
+            } catch (err) {
+                logger.error('[WeatherController] Route sampling failed:', err);
+                weatherStore.setRouteWeatherSamples([]);
+                weatherStore.setRouteWeatherAlerts([]);
+                weatherStore.setRouteWeatherConditions([]);
+                weatherStore.setRouteSamplingError(
+                    'Route weather sampling failed. En-route conditions may be incomplete.'
+                );
+            }
+        }
 
         // Notify plugin to update map layers
         onMapUpdate?.();
@@ -201,7 +273,11 @@ export async function fetchWeatherForRoute(): Promise<void> {
             weatherStore.setWeatherData(new Map());
         }
     } finally {
-        weatherStore.setLoading(false);
+        // Only clear loading if we're still the latest fetch —
+        // a newer fetch owns the loading state now.
+        if (thisGeneration === fetchGeneration) {
+            weatherStore.setLoading(false);
+        }
     }
 }
 
@@ -253,6 +329,7 @@ async function fetchElevationProfile(
             settings.enableLogging
         );
         weatherStore.setElevationProfile(profile);
+        deps?.onMapUpdate?.(); // Update map with terrain data
 
         if (settings.enableLogging) {
             logger.debug(`[WeatherController] Terrain profile: ${profile.length} elevation points`);
@@ -518,49 +595,6 @@ export async function handleDepartureTimeChange(newTime: number): Promise<void> 
     }
 }
 
-/**
- * Handle Windy timestamp change (sync from Windy to plugin)
- */
-export function handleWindyTimestampChange(windyTimestamp: number): void {
-    const depState = departureTimeStore.getState();
-
-    // Don't update if we're the ones who changed it or if sync is disabled
-    if (depState.isUpdatingToWindy || !depState.syncWithWindy) {
-        return;
-    }
-
-    // Clamp to forecast range
-    const weatherState = weatherStore.getState();
-    const { forecastRange } = weatherState;
-
-    let clampedTime = windyTimestamp;
-    if (forecastRange) {
-        clampedTime = Math.max(forecastRange.start, Math.min(windyTimestamp, forecastRange.end));
-    }
-
-    departureTimeStore.setUpdatingFromWindy(true);
-    departureTimeStore.setTime(clampedTime);
-
-    setTimeout(() => {
-        departureTimeStore.setUpdatingFromWindy(false);
-    }, 100);
-}
-
-/**
- * Toggle sync with Windy
- */
-export function toggleWindySync(): void {
-    const depState = departureTimeStore.getState();
-    departureTimeStore.setSyncWithWindy(!depState.syncWithWindy);
-
-    // If enabling sync, immediately sync to Windy's current timestamp
-    if (!depState.syncWithWindy) {
-        const windyTimestamp = store.get('timestamp') as number;
-        if (windyTimestamp) {
-            handleWindyTimestampChange(windyTimestamp);
-        }
-    }
-}
 
 /**
  * Reset all weather state (call when flight plan changes)
@@ -569,6 +603,7 @@ export function resetWeatherState(): void {
     weatherStore.reset();
     vfrWindowStore.reset();
     departureTimeStore.resetToNow();
+    clearRouteWeatherCache();
     logger.debug('[WeatherController] Weather state reset');
 }
 

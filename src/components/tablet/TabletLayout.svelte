@@ -17,9 +17,11 @@
     import AltitudeProfile from '../AltitudeProfile.svelte';
     import SettingsPanel from '../SettingsPanel.svelte';
     import ConditionsModal from '../ConditionsModal.svelte';
+    import AircraftConfigModal from '../AircraftConfigModal.svelte';
     import HelpModal from '../HelpModal.svelte';
     import AboutTab from '../AboutTab.svelte';
     import DepartureSlider from '../DepartureSlider.svelte';
+    import type { AircraftPerformance } from '../../types/settings';
     import config from '../../pluginConfig';
 
     const { title } = config;
@@ -64,6 +66,7 @@
 
     let activeTab: 'route' | 'profile' | 'settings' | 'help' | 'about' = 'route';
     let showConditionsModal = false;
+    let showAircraftConfig = false;
 
     function handleConditionsSave(e: CustomEvent<VfrConditionThresholds>) {
         dispatch('conditionsSave', e.detail);
@@ -73,6 +76,15 @@
     function handleConditionsCancel() {
         dispatch('conditionsCancel');
         showConditionsModal = false;
+    }
+
+    function handleAircraftConfigSave(e: CustomEvent<AircraftPerformance>) {
+        dispatch('aircraftConfigSave', e.detail);
+        showAircraftConfig = false;
+    }
+
+    function handleAircraftConfigCancel() {
+        showAircraftConfig = false;
     }
 </script>
 
@@ -352,6 +364,7 @@
                 on:change={() => dispatch('settingsChange')}
                 on:profileAltitudeChange
                 on:openConditionsModal={() => showConditionsModal = true}
+                on:configureAircraft={() => showAircraftConfig = true}
                 on:presetChange
             />
         {/if}
@@ -373,6 +386,13 @@
         thresholds={settings.customThresholds}
         on:save={handleConditionsSave}
         on:cancel={handleConditionsCancel}
+    />
+
+    <AircraftConfigModal
+        visible={showAircraftConfig}
+        performance={settings.aircraftPerformance}
+        on:save={handleAircraftConfigSave}
+        on:cancel={handleAircraftConfigCancel}
     />
 </section>
 

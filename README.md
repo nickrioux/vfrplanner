@@ -2,7 +2,7 @@
 
 Your pre-flight weather window assistant. A Windy plugin for VFR flight planning with flight plan import, weather integration, and altitude profile visualization.
 
-![Version](https://img.shields.io/badge/version-1.0.4-blue)
+![Version](https://img.shields.io/badge/version-1.0.5-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 ## Features
@@ -82,19 +82,17 @@ Your pre-flight weather window assistant. A Windy plugin for VFR flight planning
 
 ## Settings
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| VFR Condition Thresholds | Standard, Conservative, or Custom minimums | Standard |
-| Default Airspeed (TAS) | True airspeed for time calculations | 120 kt |
-| Default Altitude | Cruise altitude for weather lookup | 3000 ft |
-| Auto Terrain Elevation | Fetch airport elevations automatically | On |
-| Show Waypoint Labels | Display waypoint names on map | On |
-| Include Night Hours | Include nighttime in VFR window search | Off |
-| Max VFR Windows | Maximum windows to find in search | 5 |
-| Terrain Sample Interval | Distance between elevation samples | 5 NM |
-| Profile Top Height | Maximum altitude on profile graph | 15000 ft |
-| AirportDB API Key | Optional key for enhanced airport data | - |
-| Debug Logging | Enable console logging for troubleshooting | Off |
+Settings are organized into collapsible sections:
+
+**Aircraft & Regulations** — Aircraft category (airplane/helicopter), regulatory region (TC/FAA/EASA), aircraft performance configuration.
+
+**VFR Conditions** — Condition thresholds (Standard/Conservative/Custom), night hours toggle, max VFR windows.
+
+**Route Sampling** — Terrain sample interval, en-route weather sampling with configurable interval.
+
+**Display** — Profile top height, waypoint labels, auto terrain elevation, weather sample markers.
+
+**Data Sources** — Optional AirportDB API key for global airport coverage.
 
 ## Development
 
@@ -119,6 +117,15 @@ npm run build
 ```
 
 ## Changelog
+
+### v1.0.5
+- Reorganized settings panel into collapsible sections (Aircraft & Regulations, VFR Conditions, Route Sampling, Display, Data Sources)
+- Trimmed verbose setting descriptions for a cleaner UI
+- Updated help documentation to match new settings layout
+
+### v1.0.4
+- Added responsive mobile and tablet UI
+- Fixed wind altitude time updates
 
 ### v1.0.3
 - Fixed .fpl file import on iPad/iOS by adding MIME types to file input accept attribute

@@ -9,6 +9,7 @@
     import { formatDistance, formatBearing, formatEte, formatHeadwind } from '../services/navigationCalc';
     import { formatWind, formatTemperature, getCbaseTable } from '../services/weatherService';
     import { getWaypointIcon, getBestRunway } from '../utils/displayUtils';
+    import { computeClimbDescentProfile } from '../services/profileService';
     import { logger } from '../services/logger';
 
     // Props
@@ -46,6 +47,57 @@
 
     function getWaypointAltitude(wp: Waypoint): number {
         return wp.altitude ?? flightPlan?.aircraft.defaultAltitude ?? settings.defaultAltitude;
+    }
+
+    // Compute TOC/TOD positions (which waypoint index they appear after)
+    interface TocTodInfo {
+        label: string;
+        distance: number;
+        altitude: number;
+        afterIndex: number; // waypoint index after which to show
+    }
+
+    $: tocTodMarkers = computeTocTod(flightPlan, settings);
+
+    function computeTocTod(fp: FlightPlan, s: PluginSettings): TocTodInfo[] {
+        const perf = s.aircraftPerformance;
+        if (!perf || !fp || fp.waypoints.length < 2) return [];
+
+        const { climbDistNM, descentDistNM, peakAltitude, totalDist } = computeClimbDescentProfile(fp.waypoints, perf);
+        const descentStartDist = totalDist - descentDistNM;
+        const markers: TocTodInfo[] = [];
+
+        // Find which leg TOC falls in
+        // wp[i].distance is the incoming leg; cumDist after adding wp[i+1].distance
+        // gives the end of leg i (from wp[i] to wp[i+1])
+        if (climbDistNM > 0 && climbDistNM < totalDist) {
+            let cumDist = 0;
+            for (let i = 0; i < fp.waypoints.length - 1; i++) {
+                cumDist += fp.waypoints[i + 1].distance || 0;
+                if (climbDistNM <= cumDist) {
+                    markers.push({ label: 'TOC', distance: climbDistNM, altitude: Math.round(peakAltitude), afterIndex: i });
+                    break;
+                }
+            }
+        }
+
+        // Find which leg TOD falls in
+        if (descentDistNM > 0 && descentStartDist > 0 && descentStartDist < totalDist) {
+            let cumDist = 0;
+            for (let i = 0; i < fp.waypoints.length - 1; i++) {
+                cumDist += fp.waypoints[i + 1].distance || 0;
+                if (descentStartDist <= cumDist) {
+                    markers.push({ label: 'TOD', distance: descentStartDist, altitude: Math.round(peakAltitude), afterIndex: i });
+                    break;
+                }
+            }
+        }
+
+        return markers;
+    }
+
+    function getTocTodAfterIndex(index: number): TocTodInfo[] {
+        return tocTodMarkers.filter(m => m.afterIndex === index);
     }
 
     // Event handlers
@@ -257,6 +309,12 @@
                     {/each}
                 </div>
             {/if}
+            {#each getTocTodAfterIndex(index) as marker}
+                <div class="toc-tod-row" class:toc={marker.label === 'TOC'} class:tod={marker.label === 'TOD'}>
+                    <span class="toc-tod-label">{marker.label}</span>
+                    <span class="toc-tod-detail">{marker.altitude} ft · {marker.distance.toFixed(1)} NM</span>
+                </div>
+            {/each}
         {/each}
     </div>
 </div>
@@ -566,6 +624,36 @@
         gap: 6px;
         padding: 4px 4px 8px 28px;
         border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .toc-tod-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px 4px 28px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 11px;
+
+        .toc-tod-label {
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+        }
+
+        .toc-tod-detail {
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        &.toc .toc-tod-label {
+            background: rgba(0, 204, 255, 0.2);
+            color: #00ccff;
+        }
+
+        &.tod .toc-tod-label {
+            background: rgba(255, 170, 0, 0.2);
+            color: #ffaa00;
+        }
     }
 
     .alert-item {

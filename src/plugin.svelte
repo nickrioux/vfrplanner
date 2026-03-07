@@ -45,6 +45,7 @@
         on:presetChange={handlePresetChange}
         on:conditionsSave={handleConditionsSave}
         on:conditionsCancel={handleConditionsCancel}
+        on:aircraftConfigSave={handleAircraftConfigSave}
         on:profileAltitudeChange={handleProfileAltitudeChange}
         on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
         on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
@@ -113,6 +114,7 @@
         on:openConditionsModal={handleOpenConditionsModal}
         on:conditionsSave={handleConditionsSave}
         on:conditionsCancel={handleConditionsCancel}
+        on:aircraftConfigSave={handleAircraftConfigSave}
         on:profileAltitudeChange={handleProfileAltitudeChange}
         on:startEditWaypointName={(e) => startEditWaypointName(e.detail)}
         on:finishEditWaypointName={(e) => finishEditWaypointName(e.detail.waypointId, e.detail.newName)}
@@ -389,6 +391,14 @@
             {#if weatherModelWarning}
                 <div class="weather-model-warning">⚠️ {weatherModelWarning}</div>
             {/if}
+            {#if routeAlerts.length > 0}
+                <div class="route-alert-summary">
+                    Route sampling: {#if routeWarningCount > 0}{routeWarningCount} warning{routeWarningCount !== 1 ? 's' : ''}{/if}{#if routeWarningCount > 0 && routeCautionCount > 0}, {/if}{#if routeCautionCount > 0}{routeCautionCount} caution{routeCautionCount !== 1 ? 's' : ''}{/if} found along route
+                </div>
+            {/if}
+            {#if routeSamplingError}
+                <div class="weather-model-warning">⚠️ {routeSamplingError}</div>
+            {/if}
 
             <!-- Departure Time Slider -->
             {#if forecastRange}
@@ -470,6 +480,7 @@
             on:change={handleSettingsChange}
             on:profileAltitudeChange={handleProfileAltitudeChange}
             on:openConditionsModal={handleOpenConditionsModal}
+            on:configureAircraft={handleOpenAircraftConfig}
             on:presetChange={handlePresetChange}
         />
     {/if}
@@ -487,6 +498,14 @@
         thresholds={settings.customThresholds}
         on:save={handleConditionsSave}
         on:cancel={handleConditionsCancel}
+    />
+
+    <!-- Aircraft Config Modal -->
+    <AircraftConfigModal
+        visible={showAircraftConfig}
+        performance={settings.aircraftPerformance}
+        on:save={handleAircraftConfigSave}
+        on:cancel={handleAircraftConfigCancel}
     />
 
     <!-- Help Modal -->
@@ -535,11 +554,13 @@
     } from './services/airportProvider';
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
     import { DEFAULT_SETTINGS } from './types';
+    import type { AircraftPerformance } from './types/settings';
     import { type VfrConditionThresholds, type ConditionPreset, getThresholdsForPreset } from './types/conditionThresholds';
     import { getActiveThresholds } from './services/vfrConditionRules';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
     import SettingsPanel from './components/SettingsPanel.svelte';
     import ConditionsModal from './components/ConditionsModal.svelte';
+    import AircraftConfigModal from './components/AircraftConfigModal.svelte';
     import WaypointTable from './components/WaypointTable.svelte';
     import HelpModal from './components/HelpModal.svelte';
     import AboutTab from './components/AboutTab.svelte';
@@ -550,9 +571,11 @@
         weatherStore,
         vfrWindowStore,
         departureTimeStore,
+        routeWeatherAlerts as routeWeatherAlertsStore,
         type WeatherState,
         type VFRWindowState,
         type DepartureTimeState,
+        type RouteWeatherAlert,
     } from './stores/weatherStore';
     import { settingsStore } from './stores/settingsStore';
     import { uiStore } from './stores/uiStore';
@@ -564,7 +587,6 @@
         searchVFRWindows,
         useVFRWindow as controllerUseVFRWindow,
         resetWeatherState,
-        handleWindyTimestampChange as controllerHandleWindyTimestampChange,
     } from './controllers/weatherController';
     import {
         initRouteController,
@@ -620,6 +642,7 @@
 
     // Conditions modal state
     let showConditionsModal = false;
+    let showAircraftConfig = false;
     let showHelpModal = false;
 
     // AirportDB search state
@@ -639,6 +662,10 @@
     $: elevationProfile = $weatherStore.elevationProfile;
     $: forecastRange = $weatherStore.forecastRange;
     $: adjustForecastForFlightTime = $weatherStore.adjustForecastForFlightTime;
+    $: routeAlerts = $routeWeatherAlertsStore;
+    $: routeWarningCount = routeAlerts.filter(a => a.alert.severity === 'warning').length;
+    $: routeCautionCount = routeAlerts.filter(a => a.alert.severity === 'caution').length;
+    $: routeSamplingError = $weatherStore.routeSamplingError;
 
     // Departure time state - from departureTimeStore
     $: departureTime = $departureTimeStore.time;
@@ -969,6 +996,20 @@
         showConditionsModal = false;
     }
 
+    function handleOpenAircraftConfig() {
+        showAircraftConfig = true;
+    }
+
+    function handleAircraftConfigSave(event: CustomEvent<AircraftPerformance>) {
+        settingsStore.setAircraftPerformance(event.detail);
+        showAircraftConfig = false;
+        handleSettingsChange();
+    }
+
+    function handleAircraftConfigCancel() {
+        showAircraftConfig = false;
+    }
+
     function handlePresetChange(event: CustomEvent<ConditionPreset>) {
         settingsStore.setConditionPreset(event.detail);
         handleSettingsChange();
@@ -1064,25 +1105,57 @@
 
     /**
      * Handle Windy timestamp change (sync from Windy timeline to plugin)
+     * Queues the latest timestamp if a fetch is already in progress so
+     * the final slider position is always processed.
      */
+    let pendingWindyTimestamp: number | null = null;
+    let windyFetchInProgress = false;
+
+    /** Drain any pending timestamp after a fetch completes. */
+    function drainPendingWindyTimestamp() {
+        if (pendingWindyTimestamp !== null) {
+            const queued = pendingWindyTimestamp;
+            pendingWindyTimestamp = null;
+            departureTimeStore.setTime(queued);
+            windyFetchInProgress = true;
+            handleReadWeather().finally(() => {
+                windyFetchInProgress = false;
+                departureTimeStore.setUpdatingFromWindy(false);
+                // Recurse: another change may have arrived during this fetch
+                drainPendingWindyTimestamp();
+            });
+        } else {
+            departureTimeStore.setUpdatingFromWindy(false);
+        }
+    }
+
     function handleWindyTimestampChange(newTimestamp: number) {
         const depState = departureTimeStore.getState();
 
         // Only sync if enabled and we have a forecast range
         // Skip if we're currently updating Windy (to avoid loops)
-        if (!depState.syncWithWindy || !forecastRange || isLoadingWeather || depState.isUpdatingToWindy) return;
+        if (!depState.syncWithWindy || !forecastRange || depState.isUpdatingToWindy) return;
 
         // Clamp to forecast range
         const clampedTime = Math.max(forecastRange.start, Math.min(newTimestamp, forecastRange.end));
 
         // Only update if significantly different (avoid infinite loops)
-        if (Math.abs(clampedTime - departureTime) > 5000) {
-            departureTimeStore.setUpdatingFromWindy(true);
-            departureTimeStore.setTime(clampedTime);
-            handleReadWeather().finally(() => {
-                departureTimeStore.setUpdatingFromWindy(false);
-            });
+        if (Math.abs(clampedTime - departureTime) < 5000) return;
+
+        // If a fetch is in progress, queue the latest timestamp for later
+        if (isLoadingWeather || windyFetchInProgress) {
+            pendingWindyTimestamp = clampedTime;
+            return;
         }
+
+        pendingWindyTimestamp = null;
+        windyFetchInProgress = true;
+        departureTimeStore.setUpdatingFromWindy(true);
+        departureTimeStore.setTime(clampedTime);
+        handleReadWeather().finally(() => {
+            windyFetchInProgress = false;
+            drainPendingWindyTimestamp();
+        });
     }
 
     /**
@@ -2145,6 +2218,15 @@
         background: rgba(243, 156, 18, 0.2);
         border-radius: 4px;
         color: #f39c12;
+        font-size: 12px;
+    }
+
+    .route-alert-summary {
+        margin: 0 10px 10px;
+        padding: 8px;
+        background: rgba(231, 76, 60, 0.15);
+        border-radius: 4px;
+        color: #e74c3c;
         font-size: 12px;
     }
 

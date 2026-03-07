@@ -3,7 +3,7 @@
     import type { FlightPlan } from '../types/flightPlan';
     import type { WaypointWeather, LevelWind } from '../services/weatherService';
     import type { PluginSettings } from '../types';
-    import { calculateProfileData, type ProfileDataPoint, type SegmentCondition } from '../services/profileService';
+    import { calculateProfileData, interpolateAltitude, type ProfileDataPoint, type SegmentCondition } from '../services/profileService';
     import type { ElevationPoint } from '../services/elevationService';
     import { lerpAngle } from '../utils/interpolation';
     import { logger } from '../services/logger';
@@ -33,10 +33,86 @@
     // Calculate profile data - includes all terrain samples + waypoints
     // Use aircraft-aware thresholds to match mapController's evaluation
     $: thresholds = getActiveThresholds(settings);
-    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude, elevationProfile, thresholds);
+    $: profileData = calculateProfileData(flightPlan.waypoints, weatherData, flightPlan.aircraft.defaultAltitude, elevationProfile, thresholds, settings.aircraftPerformance);
 
-    // Extract only waypoint data for flight path and wind display
+    // Extract only waypoint data for wind display and markers
     $: waypointProfileData = profileData.filter(p => p.waypointId !== undefined);
+
+    // Extract TOC/TOD points for markers
+    $: tocPoint = profileData.find(p => p.isTopOfClimb);
+    $: todPoint = profileData.find(p => p.isTopOfDescent);
+
+    // Build condition-colored flight path from waypoints + TOC/TOD key points only
+    // Store distance/altitude (not pixel coords) so the template always uses current scale
+    interface FlightPathSegment {
+        points: { distance: number; altitude: number }[];
+        color: string;
+    }
+
+    $: flightPathSegments = buildFlightPathSegments(waypointProfileData, tocPoint, todPoint, settings);
+
+    function buildFlightPathSegments(
+        wpPoints: ProfileDataPoint[],
+        toc: ProfileDataPoint | undefined,
+        tod: ProfileDataPoint | undefined,
+        currentSettings: PluginSettings,
+    ): FlightPathSegment[] {
+        if (wpPoints.length < 2) return [];
+
+        // Merge waypoints with TOC/TOD, sorted by distance
+        // When performance config is available, override waypoint altitudes with
+        // performance-based profile to produce a clean trapezoidal flight path
+        const perf = currentSettings.aircraftPerformance;
+        const defaultAlt = flightPlan.aircraft.defaultAltitude;
+        const wps = flightPlan.waypoints;
+        const keyPoints: { distance: number; altitude: number; condition?: SegmentCondition }[] =
+            wpPoints.map(p => ({
+                distance: p.distance,
+                altitude: perf ? interpolateAltitude(p.distance, wps, defaultAlt, perf) : p.altitude,
+                condition: p.condition,
+            }));
+
+        if (toc) keyPoints.push({ distance: toc.distance, altitude: toc.altitude });
+        if (tod) keyPoints.push({ distance: tod.distance, altitude: tod.altitude });
+        keyPoints.sort((a, b) => a.distance - b.distance);
+
+        // Assign condition to TOC/TOD points from enclosing waypoint
+        for (const pt of keyPoints) {
+            if (pt.condition === undefined) {
+                for (let i = wpPoints.length - 1; i >= 0; i--) {
+                    if (pt.distance >= wpPoints[i].distance) {
+                        pt.condition = wpPoints[i].condition;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Build segments split by condition color (using distance/altitude, not pixels)
+        const segments: FlightPathSegment[] = [];
+        let currentColor = getSegmentColor(keyPoints[0].condition);
+        let currentPoints = [{ distance: keyPoints[0].distance, altitude: keyPoints[0].altitude }];
+
+        for (let i = 1; i < keyPoints.length; i++) {
+            const color = getSegmentColor(keyPoints[i].condition);
+            const pt = { distance: keyPoints[i].distance, altitude: keyPoints[i].altitude };
+
+            if (color !== currentColor) {
+                currentPoints.push(pt);
+                segments.push({ points: currentPoints, color: currentColor });
+                currentColor = color;
+                currentPoints = [pt];
+            } else {
+                currentPoints.push(pt);
+            }
+        }
+
+        if (currentPoints.length >= 2) {
+            segments.push({ points: currentPoints, color: currentColor });
+        }
+
+        return segments;
+    }
 
     // Create a reactive key that changes when scale parameters change
     // This forces re-rendering of all altitude-dependent elements
@@ -628,21 +704,16 @@
                 />
             {/if}
 
-            <!-- Altitude profile line (waypoints only, segmented by condition) -->
-            {#each waypointProfileData as point, index}
-                {#if index < waypointProfileData.length - 1}
-                    {@const nextPoint = waypointProfileData[index + 1]}
-                    {@const segmentColor = getSegmentColor(point.condition)}
-                    <line
-                        x1={distanceToX(point.distance)}
-                        y1={altitudeToY(point.altitude)}
-                        x2={distanceToX(nextPoint.distance)}
-                        y2={altitudeToY(nextPoint.altitude)}
-                        stroke={segmentColor}
-                        stroke-width="3"
-                        stroke-linecap="round"
-                    />
-                {/if}
+            <!-- Altitude profile line (all points, condition-colored segments) -->
+            {#each flightPathSegments as segment}
+                <polyline
+                    points={segment.points.map(p => `${distanceToX(p.distance)},${altitudeToY(p.altitude)}`).join(' ')}
+                    fill="none"
+                    stroke={segment.color}
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
             {/each}
 
             <!-- Vertical wind barbs at multiple altitude levels -->
@@ -721,6 +792,46 @@
                     >{point.waypointName}</text>
                 {/if}
             {/each}
+
+            <!-- TOC marker -->
+            {#if tocPoint}
+                {@const tx = distanceToX(tocPoint.distance)}
+                {@const ty = altitudeToY(tocPoint.altitude)}
+                <polygon
+                    points="{tx},{ty - 8} {tx - 6},{ty + 4} {tx + 6},{ty + 4}"
+                    fill="#00ccff"
+                    stroke="white"
+                    stroke-width="1.5"
+                />
+                <text
+                    x={tx}
+                    y={ty - 12}
+                    fill="#00ccff"
+                    font-size="10"
+                    font-weight="600"
+                    text-anchor="middle"
+                >TOC</text>
+            {/if}
+
+            <!-- TOD marker -->
+            {#if todPoint}
+                {@const tx = distanceToX(todPoint.distance)}
+                {@const ty = altitudeToY(todPoint.altitude)}
+                <polygon
+                    points="{tx},{ty - 8} {tx - 6},{ty + 4} {tx + 6},{ty + 4}"
+                    fill="#ffaa00"
+                    stroke="white"
+                    stroke-width="1.5"
+                />
+                <text
+                    x={tx}
+                    y={ty - 12}
+                    fill="#ffaa00"
+                    font-size="10"
+                    font-weight="600"
+                    text-anchor="middle"
+                >TOD</text>
+            {/if}
 
             <!-- Cursor/crosshair -->
             {#if cursorDistance !== null}

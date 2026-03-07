@@ -4,7 +4,7 @@
  */
 
 import { writable, get, type Writable } from 'svelte/store';
-import type { PluginSettings } from '../types/settings';
+import type { PluginSettings, AircraftPerformance } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 import type { VfrConditionThresholds, ConditionPreset } from '../types/conditionThresholds';
 import { getThresholdsForPreset } from '../types/conditionThresholds';
@@ -132,6 +132,27 @@ function createSettingsStore() {
         },
 
         /**
+         * Set weather sample enabled
+         */
+        setWeatherSampleEnabled: (enabled: boolean) => {
+            update(state => ({ ...state, weatherSampleEnabled: enabled }));
+        },
+
+        /**
+         * Set weather sample interval
+         */
+        setWeatherSampleInterval: (interval: number) => {
+            update(state => ({ ...state, weatherSampleInterval: Math.max(5, interval) }));
+        },
+
+        /**
+         * Set weather sample show dots (debug)
+         */
+        setWeatherSampleShowDots: (show: boolean) => {
+            update(state => ({ ...state, weatherSampleShowDots: show }));
+        },
+
+        /**
          * Set include night flights for VFR window search
          */
         setIncludeNightFlights: (include: boolean) => {
@@ -157,6 +178,18 @@ function createSettingsStore() {
          */
         setRegion: (region: PluginSettings['region']) => {
             update(state => ({ ...state, region: region }));
+        },
+
+        /**
+         * Set aircraft performance (also syncs defaultAirspeed/defaultAltitude)
+         */
+        setAircraftPerformance: (perf: AircraftPerformance) => {
+            update(state => ({
+                ...state,
+                aircraftPerformance: perf,
+                defaultAirspeed: perf.cruiseTAS,
+                defaultAltitude: perf.cruiseAltitude,
+            }));
         },
     };
 }

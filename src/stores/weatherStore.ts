@@ -9,6 +9,35 @@ import type { ElevationPoint } from '../services/elevationService';
 import type { VFRWindow, MinimumConditionLevel } from '../types/vfrWindow';
 
 /**
+ * Weather data for a sampled point along the route
+ */
+export interface RouteWeatherSample {
+    distance: number;   // NM from departure
+    lat: number;
+    lon: number;
+    weather: WaypointWeather;
+}
+
+/**
+ * Pre-computed VFR condition at a route sample point (cached to avoid
+ * recalculating on every map repaint).
+ */
+export interface RouteWeatherConditionCache {
+    lat: number;
+    lon: number;
+    distance: number;
+    condition: 'good' | 'marginal' | 'poor' | 'unknown';
+}
+
+/**
+ * Alert at a sampled route point
+ */
+export interface RouteWeatherAlert {
+    distance: number;   // NM where alert occurs
+    alert: WeatherAlert;
+}
+
+/**
  * Weather state interface
  */
 export interface WeatherState {
@@ -28,6 +57,14 @@ export interface WeatherState {
     elevationProfile: ElevationPoint[];
     /** Whether to adjust forecast for flight time at each waypoint */
     adjustForecastForFlightTime: boolean;
+    /** Weather samples along the route (intermediate points) */
+    routeWeatherSamples: RouteWeatherSample[];
+    /** Alerts from route weather samples */
+    routeWeatherAlerts: RouteWeatherAlert[];
+    /** Error message when route sampling fails (null = no error) */
+    routeSamplingError: string | null;
+    /** Pre-computed VFR conditions at sample points (avoids recalculating on every map update) */
+    routeWeatherConditions: RouteWeatherConditionCache[];
 }
 
 /**
@@ -70,6 +107,10 @@ const initialWeatherState: WeatherState = {
     forecastRange: null,
     elevationProfile: [],
     adjustForecastForFlightTime: true,
+    routeWeatherSamples: [],
+    routeWeatherAlerts: [],
+    routeSamplingError: null,
+    routeWeatherConditions: [],
 };
 
 const initialVFRWindowState: VFRWindowState = {
@@ -150,6 +191,34 @@ function createWeatherStore() {
          */
         setAdjustForecastForFlightTime: (adjust: boolean) => {
             update(state => ({ ...state, adjustForecastForFlightTime: adjust }));
+        },
+
+        /**
+         * Set route weather samples
+         */
+        setRouteWeatherSamples: (samples: RouteWeatherSample[]) => {
+            update(state => ({ ...state, routeWeatherSamples: samples }));
+        },
+
+        /**
+         * Set route weather alerts
+         */
+        setRouteWeatherAlerts: (alerts: RouteWeatherAlert[]) => {
+            update(state => ({ ...state, routeWeatherAlerts: alerts }));
+        },
+
+        /**
+         * Set route sampling error
+         */
+        setRouteSamplingError: (error: string | null) => {
+            update(state => ({ ...state, routeSamplingError: error }));
+        },
+
+        /**
+         * Set pre-computed route weather conditions
+         */
+        setRouteWeatherConditions: (conditions: RouteWeatherConditionCache[]) => {
+            update(state => ({ ...state, routeWeatherConditions: conditions }));
         },
 
         /**
@@ -322,6 +391,16 @@ export const elevationProfile: Readable<ElevationPoint[]> = derived(
 export const hasAnyAlerts: Readable<boolean> = derived(
     weatherStore,
     $state => $state.weatherAlerts.size > 0
+);
+
+export const routeWeatherAlerts: Readable<RouteWeatherAlert[]> = derived(
+    weatherStore,
+    $state => $state.routeWeatherAlerts
+);
+
+export const hasRouteAlerts: Readable<boolean> = derived(
+    weatherStore,
+    $state => $state.routeWeatherAlerts.length > 0
 );
 
 export const vfrWindows: Readable<VFRWindow[] | null> = derived(

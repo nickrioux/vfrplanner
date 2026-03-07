@@ -6,6 +6,7 @@
 import type { Waypoint, RunwayInfo } from '../types/flightPlan';
 import type { WaypointWeather, LevelWind } from './weatherService';
 import type { VfrConditionThresholds } from '../types/conditionThresholds';
+import type { AircraftPerformance } from '../types/settings';
 import { calculateHeadwindComponent, calculateWindComponents, type WindComponents } from './navigationCalc';
 import { logger } from './logger';
 import { getElevationForWaypoint, getElevationAtDistance, type ElevationPoint } from './elevationService';
@@ -315,29 +316,103 @@ export interface ProfileDataPoint {
     waypointName?: string;   // Waypoint name for labeling
     condition?: SegmentCondition; // VFR condition assessment
     conditionReasons?: string[]; // Factors causing marginal/poor rating
+    isTopOfClimb?: boolean;      // TOC marker
+    isTopOfDescent?: boolean;    // TOD marker
+}
+
+/**
+ * Compute climb/descent profile distances and peak altitude
+ * Returns distances for TOC/TOD and the effective cruise altitude
+ * (which may be reduced for short routes where climb+descent overlap)
+ */
+export function computeClimbDescentProfile(
+    waypoints: Waypoint[],
+    performance: AircraftPerformance
+): { climbDistNM: number; descentDistNM: number; peakAltitude: number; totalDist: number; departureElev: number; arrivalElev: number } {
+    // wp[i].distance is the incoming leg (from wp[i-1] to wp[i]); wp[0].distance = 0
+    const totalDist = waypoints.reduce((sum, wp) => sum + (wp.distance || 0), 0);
+    const departureElev = waypoints[0].elevation ?? 0;
+    const arrivalElev = waypoints[waypoints.length - 1].elevation ?? 0;
+
+    const climbAltGain = Math.max(0, performance.cruiseAltitude - departureElev);
+    const climbTimeMin = climbAltGain / performance.rateOfClimb;
+    const climbDistNM = (performance.climbSpeed / 60) * climbTimeMin;
+
+    const descentAltLoss = Math.max(0, performance.cruiseAltitude - arrivalElev);
+    const descentTimeMin = descentAltLoss / performance.rateOfDescent;
+    const descentDistNM = (performance.descentSpeed / 60) * descentTimeMin;
+
+    if (climbDistNM + descentDistNM > totalDist && totalDist > 0) {
+        // Triangular profile: climb and descent meet before reaching cruise altitude
+        // Solve for peak altitude where climb distance + descent distance = totalDist
+        // climbDist = (climbSpeed/60) * (peakAlt - depElev) / ROC
+        // descentDist = (descentSpeed/60) * (peakAlt - arrElev) / ROD
+        // climbDist + descentDist = totalDist
+        const climbRate = (performance.climbSpeed / 60) / performance.rateOfClimb; // NM per ft
+        const descentRate = (performance.descentSpeed / 60) / performance.rateOfDescent; // NM per ft
+        const peakAltitude = (totalDist + climbRate * departureElev + descentRate * arrivalElev) / (climbRate + descentRate);
+        const adjClimbDist = climbRate * (peakAltitude - departureElev);
+        const adjDescentDist = descentRate * (peakAltitude - arrivalElev);
+        return { climbDistNM: adjClimbDist, descentDistNM: adjDescentDist, peakAltitude, totalDist, departureElev, arrivalElev };
+    }
+
+    return { climbDistNM, descentDistNM, peakAltitude: performance.cruiseAltitude, totalDist, departureElev, arrivalElev };
 }
 
 /**
  * Interpolate altitude between waypoints
+ * When performance data is provided, models realistic climb/descent phases
  * @param distance - Distance along route in NM
  * @param waypoints - Array of waypoints
  * @param defaultAltitude - Default altitude if no waypoint altitude specified
+ * @param performance - Optional aircraft performance for climb/descent modeling
  * @returns Interpolated altitude in feet MSL
  */
-function interpolateAltitude(distance: number, waypoints: Waypoint[], defaultAltitude: number): number {
+export function interpolateAltitude(
+    distance: number,
+    waypoints: Waypoint[],
+    defaultAltitude: number,
+    performance?: AircraftPerformance
+): number {
     if (waypoints.length === 0) return defaultAltitude;
     if (waypoints.length === 1) return waypoints[0].altitude ?? defaultAltitude;
 
+    // Performance-based altitude profile
+    if (performance && waypoints.length >= 2) {
+        const { climbDistNM, descentDistNM, peakAltitude, totalDist, departureElev, arrivalElev } = computeClimbDescentProfile(waypoints, performance);
+
+        if (totalDist <= 0) return defaultAltitude;
+
+        const descentStartDist = totalDist - descentDistNM;
+
+        if (distance <= 0) {
+            return departureElev;
+        } else if (distance >= totalDist) {
+            return arrivalElev;
+        } else if (distance <= climbDistNM) {
+            // Climb phase: linear from departure to peak
+            const t = distance / climbDistNM;
+            return departureElev + (peakAltitude - departureElev) * t;
+        } else if (distance >= descentStartDist) {
+            // Descent phase: linear from peak to arrival
+            const t = (distance - descentStartDist) / descentDistNM;
+            return peakAltitude + (arrivalElev - peakAltitude) * t;
+        } else {
+            // Cruise phase
+            return peakAltitude;
+        }
+    }
+
+    // Fallback: simple linear interpolation between waypoints
     let cumulativeDistance = 0;
 
-    // Find the two waypoints to interpolate between
     for (let i = 0; i < waypoints.length - 1; i++) {
         const wp1 = waypoints[i];
         const wp2 = waypoints[i + 1];
-        const legDistance = wp1.distance || 0;
+        // wp[i+1].distance is the incoming leg length (from wp[i] to wp[i+1])
+        const legDistance = wp2.distance || 0;
 
         if (distance >= cumulativeDistance && distance <= cumulativeDistance + legDistance) {
-            // Interpolate between wp1 and wp2
             const alt1 = wp1.altitude ?? defaultAltitude;
             const alt2 = wp2.altitude ?? defaultAltitude;
             const t = (distance - cumulativeDistance) / legDistance;
@@ -347,7 +422,6 @@ function interpolateAltitude(distance: number, waypoints: Waypoint[], defaultAlt
         cumulativeDistance += legDistance;
     }
 
-    // If beyond the end, return last waypoint altitude
     return waypoints[waypoints.length - 1].altitude ?? defaultAltitude;
 }
 
@@ -367,7 +441,8 @@ export function calculateProfileData(
     weatherData: Map<string, WaypointWeather>,
     defaultAltitude: number = 3000,
     elevationProfile: ElevationPoint[] = [],
-    thresholds?: VfrConditionThresholds
+    thresholds?: VfrConditionThresholds,
+    performance?: AircraftPerformance
 ): ProfileDataPoint[] {
     if (waypoints.length === 0) {
         return [];
@@ -392,7 +467,7 @@ export function calculateProfileData(
             // For waypoints, use the waypoint's actual altitude; for terrain samples, interpolate
             const altitude = isWaypoint && wp
                 ? (wp.altitude ?? defaultAltitude)
-                : interpolateAltitude(elevPoint.distance, waypoints, defaultAltitude);
+                : interpolateAltitude(elevPoint.distance, waypoints, defaultAltitude, performance);
 
             // For waypoints, calculate full weather data
             let cloudBase: number | undefined;
@@ -485,8 +560,14 @@ export function calculateProfileData(
         let cumulativeDistance = 0;
 
         waypoints.forEach((wp, index) => {
+            // wp.distance is the incoming leg (from previous waypoint); wp[0].distance = 0
+            // Accumulate before creating the point so each waypoint is at the correct position
+            cumulativeDistance += wp.distance || 0;
+
             const wx = weatherData.get(wp.id);
-            const altitude = wp.altitude ?? defaultAltitude;
+            const altitude = performance
+                ? interpolateAltitude(cumulativeDistance, waypoints, defaultAltitude, performance)
+                : (wp.altitude ?? defaultAltitude);
             // wp.elevation is already in feet MSL (no conversion needed)
             const terrainElevation = wp.elevation ?? undefined;
 
@@ -547,11 +628,93 @@ export function calculateProfileData(
             point.conditionReasons = conditionResult.reasons;
 
             profilePoints.push(point);
-
-            if (index < waypoints.length - 1) {
-                cumulativeDistance += wp.distance || 0;
-            }
         });
+    }
+
+    // Insert synthetic TOC/TOD points at exact computed distances
+    if (performance && waypoints.length >= 2 && profilePoints.length > 0) {
+        const { climbDistNM, descentDistNM, peakAltitude, totalDist } = computeClimbDescentProfile(waypoints, performance);
+        const descentStartDist = totalDist - descentDistNM;
+
+        // Helper: interpolate terrain elevation from surrounding profile points
+        function interpolateTerrainAt(dist: number): number | undefined {
+            for (let i = 0; i < profilePoints.length - 1; i++) {
+                if (dist >= profilePoints[i].distance && dist <= profilePoints[i + 1].distance) {
+                    const e1 = profilePoints[i].terrainElevation;
+                    const e2 = profilePoints[i + 1].terrainElevation;
+                    if (e1 === undefined || e2 === undefined) return e1 ?? e2;
+                    const segLen = profilePoints[i + 1].distance - profilePoints[i].distance;
+                    if (segLen <= 0) return e1;
+                    const t = (dist - profilePoints[i].distance) / segLen;
+                    return e1 + (e2 - e1) * t;
+                }
+            }
+            return profilePoints[profilePoints.length - 1].terrainElevation;
+        }
+
+        // Helper: interpolate wind from surrounding profile points
+        function interpolateWindAt(dist: number): { windSpeed: number; windDir: number; headwindComponent: number; crosswindComponent: number } {
+            for (let i = 0; i < profilePoints.length - 1; i++) {
+                if (dist >= profilePoints[i].distance && dist <= profilePoints[i + 1].distance) {
+                    const p1 = profilePoints[i];
+                    const p2 = profilePoints[i + 1];
+                    const segLen = p2.distance - p1.distance;
+                    if (segLen <= 0) return { windSpeed: p1.windSpeed, windDir: p1.windDir, headwindComponent: p1.headwindComponent, crosswindComponent: p1.crosswindComponent };
+                    const t = (dist - p1.distance) / segLen;
+                    return {
+                        windSpeed: p1.windSpeed + (p2.windSpeed - p1.windSpeed) * t,
+                        windDir: p1.windDir + (p2.windDir - p1.windDir) * t,
+                        headwindComponent: p1.headwindComponent + (p2.headwindComponent - p1.headwindComponent) * t,
+                        crosswindComponent: p1.crosswindComponent + (p2.crosswindComponent - p1.crosswindComponent) * t,
+                    };
+                }
+            }
+            const last = profilePoints[profilePoints.length - 1];
+            return { windSpeed: last.windSpeed, windDir: last.windDir, headwindComponent: last.headwindComponent, crosswindComponent: last.crosswindComponent };
+        }
+
+        // Insert TOC as synthetic point
+        if (climbDistNM > 0 && climbDistNM < totalDist) {
+            const wind = interpolateWindAt(climbDistNM);
+            const tocSynthetic: ProfileDataPoint = {
+                distance: climbDistNM,
+                altitude: peakAltitude,
+                terrainElevation: interpolateTerrainAt(climbDistNM),
+                headwindComponent: wind.headwindComponent,
+                crosswindComponent: wind.crosswindComponent,
+                windSpeed: wind.windSpeed,
+                windDir: wind.windDir,
+                isTopOfClimb: true,
+            };
+            // Find insertion index (sorted by distance)
+            const tocIdx = profilePoints.findIndex(p => p.distance > climbDistNM);
+            if (tocIdx === -1) {
+                profilePoints.push(tocSynthetic);
+            } else {
+                profilePoints.splice(tocIdx, 0, tocSynthetic);
+            }
+        }
+
+        // Insert TOD as synthetic point
+        if (descentDistNM > 0 && descentStartDist > 0 && descentStartDist < totalDist) {
+            const wind = interpolateWindAt(descentStartDist);
+            const todSynthetic: ProfileDataPoint = {
+                distance: descentStartDist,
+                altitude: peakAltitude,
+                terrainElevation: interpolateTerrainAt(descentStartDist),
+                headwindComponent: wind.headwindComponent,
+                crosswindComponent: wind.crosswindComponent,
+                windSpeed: wind.windSpeed,
+                windDir: wind.windDir,
+                isTopOfDescent: true,
+            };
+            const todIdx = profilePoints.findIndex(p => p.distance > descentStartDist);
+            if (todIdx === -1) {
+                profilePoints.push(todSynthetic);
+            } else {
+                profilePoints.splice(todIdx, 0, todSynthetic);
+            }
+        }
     }
 
     return profilePoints;

@@ -14,9 +14,11 @@ import { settingsStore } from '../stores/settingsStore';
 
 import { calculateProfileData } from '../services/profileService';
 import { getActiveThresholds } from '../services/vfrConditionRules';
+import { evaluateRouteWeatherConditions, type RouteWeatherCondition } from '../services/routeWeatherSamplingService';
 import { getSegmentColor, getMarkerColor, getBestRunway } from '../utils/displayUtils';
 import { formatWind, formatTemperature, type WaypointWeather } from '../services/weatherService';
 import { formatBearing, formatDistance } from '../services/navigationCalc';
+import { getLatLonAtDistance } from '../utils/interpolation';
 import { logger } from '../services/logger';
 
 import type { FlightPlan, Waypoint } from '../types';
@@ -98,54 +100,133 @@ export function updateMapLayers(): void {
         weatherData,
         flightPlan.aircraft.defaultAltitude,
         elevationProfile,
-        thresholds
+        thresholds,
+        settings.aircraftPerformance
     );
+
+    // When route weather sampling is active, use pre-computed sample conditions
+    // from the store (computed once in weatherController after fetching samples).
+    const { routeWeatherSamples, routeWeatherConditions } = weatherStore.getState();
+    const useSampleColoring = settings.weatherSampleEnabled && routeWeatherConditions.length > 0;
+
+    const sampleConditions: RouteWeatherCondition[] = useSampleColoring
+        ? routeWeatherConditions
+        : [];
+
+    // Compute cumulative distances at each waypoint for matching samples to legs
+    // wp[i].distance is the incoming leg (from wp[i-1] to wp[i]), wp[0].distance = 0
+    const wpCumulDist: number[] = [0];
+    for (let i = 1; i < flightPlan.waypoints.length; i++) {
+        wpCumulDist.push(wpCumulDist[i - 1] + (flightPlan.waypoints[i].distance || 0));
+    }
 
     // Create route with color-coded segments
     routeLayer = new L.LayerGroup();
 
-    // Create a polyline segment for each pair of waypoints
-    for (let i = 0; i < flightPlan.waypoints.length - 1; i++) {
-        const wp1 = flightPlan.waypoints[i];
-        const wp2 = flightPlan.waypoints[i + 1];
-        // Find the correct profile point by waypoint ID (profileData may contain terrain samples between waypoints)
-        const wp1ProfilePoint = profileData.find(p => p.waypointId === wp1.id);
-        const condition = wp1ProfilePoint?.condition;
-
-        const segmentCoords: [number, number][] = [
-            [wp1.lat, wp1.lon],
-            [wp2.lat, wp2.lon]
-        ];
-
-        const segmentColor = getSegmentColor(condition);
-
-        const segment = new L.Polyline(segmentCoords, {
-            color: segmentColor,
-            weight: 4,
-            opacity: 0.8,
-        });
-
-        // Add click handler to insert waypoint on this segment
-        const segmentIndex = i; // Capture for closure
-        segment.on('click', (e: L.LeafletMouseEvent) => {
+    // Helper to attach click/hover handlers to a polyline segment
+    function attachSegmentHandlers(polyline: L.Polyline, segmentIndex: number): void {
+        polyline.on('click', (e: L.LeafletMouseEvent) => {
             if (isEditMode) {
                 L.DomEvent.stopPropagation(e);
                 onSegmentClick(segmentIndex, e.latlng.lat, e.latlng.lng);
             }
         });
-
-        // Change cursor when hovering if edit mode is enabled
-        segment.on('mouseover', () => {
+        polyline.on('mouseover', () => {
             if (routeStore.getState().isEditMode) {
                 map.getContainer().style.cursor = 'crosshair';
             }
         });
-
-        segment.on('mouseout', () => {
+        polyline.on('mouseout', () => {
             map.getContainer().style.cursor = '';
         });
+    }
 
-        routeLayer.addLayer(segment);
+    // Create polyline segments for each pair of waypoints
+    for (let i = 0; i < flightPlan.waypoints.length - 1; i++) {
+        const wp1 = flightPlan.waypoints[i];
+        const wp2 = flightPlan.waypoints[i + 1];
+
+        if (useSampleColoring) {
+            // Sample-based coloring: build sub-segments from waypoint + sample positions
+            const legStart = wpCumulDist[i];
+            const legEnd = wpCumulDist[i + 1];
+
+            // Gather samples that fall on this leg
+            const legSamples = sampleConditions.filter(
+                s => s.distance > legStart + 0.1 && s.distance < legEnd - 0.1
+            );
+
+            // Evaluate condition at waypoint positions using their weather data
+            const wp1Wx = weatherData.get(wp1.id);
+            const wp1Condition = wp1Wx
+                ? evaluateRouteWeatherConditions(
+                      [{ distance: legStart, lat: wp1.lat, lon: wp1.lon, weather: wp1Wx }],
+                      flightPlan.aircraft.defaultAltitude,
+                      thresholds,
+                  )[0]?.condition
+                : undefined;
+
+            // All points along this leg: waypoint start, intermediate samples
+            const points: { lat: number; lon: number; condition: typeof wp1Condition }[] = [
+                { lat: wp1.lat, lon: wp1.lon, condition: wp1Condition },
+                ...legSamples.map(s => ({ lat: s.lat, lon: s.lon, condition: s.condition })),
+            ];
+            const endPoint = { lat: wp2.lat, lon: wp2.lon };
+
+            for (let j = 0; j < points.length; j++) {
+                const from = points[j];
+                const to = j < points.length - 1 ? points[j + 1] : endPoint;
+                const seg = new L.Polyline(
+                    [[from.lat, from.lon], [to.lat, to.lon]],
+                    { color: getSegmentColor(from.condition), weight: 4, opacity: 0.8 },
+                );
+                attachSegmentHandlers(seg, i);
+                routeLayer.addLayer(seg);
+            }
+            // Debug: add small dots at each sample point with weather popup
+            if (settings.weatherSampleShowDots) {
+                for (const sample of legSamples) {
+                    // Find the matching RouteWeatherSample for weather data
+                    const wxSample = routeWeatherSamples.find(
+                        s => Math.abs(s.distance - sample.distance) < 0.1
+                    );
+
+                    const dot = new L.Marker([sample.lat, sample.lon], {
+                        interactive: true,
+                        icon: new L.DivIcon({
+                            className: 'wx-sample-dot',
+                            html: `<div style="
+                                width: 8px;
+                                height: 8px;
+                                border-radius: 50%;
+                                background: ${getSegmentColor(sample.condition)};
+                                border: 1px solid rgba(255,255,255,0.7);
+                                box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+                                cursor: pointer;
+                            "></div>`,
+                            iconSize: [8, 8],
+                            iconAnchor: [4, 4],
+                        }),
+                    });
+
+                    if (wxSample) {
+                        const popup = buildSamplePopup(wxSample.weather, sample);
+                        dot.bindPopup(popup, { className: 'wx-sample-popup' });
+                    }
+
+                    routeLayer.addLayer(dot);
+                }
+            }
+        } else {
+            // Standard per-waypoint profile coloring
+            const wp1ProfilePoint = profileData.find(p => p.waypointId === wp1.id);
+            const segment = new L.Polyline(
+                [[wp1.lat, wp1.lon], [wp2.lat, wp2.lon]],
+                { color: getSegmentColor(wp1ProfilePoint?.condition), weight: 4, opacity: 0.8 },
+            );
+            attachSegmentHandlers(segment, i);
+            routeLayer.addLayer(segment);
+        }
     }
 
     map.addLayer(routeLayer);
@@ -217,11 +298,66 @@ export function updateMapLayers(): void {
         waypointMarkers?.addLayer(marker);
     });
 
+    // Add TOC/TOD markers
+    const tocPoint = profileData.find(p => p.isTopOfClimb);
+    const todPoint = profileData.find(p => p.isTopOfDescent);
+
+    for (const { point, label, color } of [
+        { point: tocPoint, label: 'TOC', color: '#00ccff' },
+        { point: todPoint, label: 'TOD', color: '#ffaa00' },
+    ]) {
+        if (!point) continue;
+        const pos = getLatLonAtDistance(point.distance, flightPlan.waypoints);
+        if (!pos) continue;
+
+        const tocTodMarker = new L.Marker([pos.lat, pos.lon], {
+            draggable: false,
+            interactive: true,
+            icon: new L.DivIcon({
+                className: 'toc-tod-marker',
+                html: `<div style="
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 32px;
+                    height: 18px;
+                    border-radius: 9px;
+                    background: ${color};
+                    color: #000;
+                    font-size: 10px;
+                    font-weight: 700;
+                    border: 1px solid white;
+                    box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+                ">${label}</div>`,
+                iconSize: [32, 18],
+                iconAnchor: [16, 9],
+            }),
+        });
+
+        tocTodMarker.bindTooltip(
+            `<b>${label}</b><br/>${Math.round(point.altitude)} ft MSL<br/>${point.distance.toFixed(1)} NM`,
+            { direction: 'top' }
+        );
+
+        waypointMarkers?.addLayer(tocTodMarker);
+    }
+
     if (settings.enableLogging) {
         logger.debug('[MapController] Created', flightPlan.waypoints.length, 'waypoint markers');
     }
 
     map.addLayer(waypointMarkers);
+
+    // Force Leaflet/Windy GL renderer to repaint after new layers are added.
+    // Without this, the browser may not visually update until the tab loses
+    // and regains focus (visibility change triggers a native repaint).
+    requestAnimationFrame(() => {
+        try {
+            map.invalidateSize({ animate: false });
+        } catch (_e) {
+            // ignore
+        }
+    });
 
     if (settings.enableLogging) {
         logger.debug('[MapController] Added waypointMarkers layer to map');
@@ -365,11 +501,61 @@ function buildWaypointTooltip(
 }
 
 /**
+ * Build popup content for a route weather sample point
+ */
+function buildSamplePopup(
+    wx: WaypointWeather,
+    sample: RouteWeatherCondition,
+): string {
+    const conditionColor = getSegmentColor(sample.condition);
+    let html = '<div style="font-size: 12px; line-height: 1.5;">';
+
+    html += `<b>Route Sample @ ${sample.distance.toFixed(1)} NM</b>`;
+    html += `<br/><span style="color: ${conditionColor}; font-weight: bold;">Conditions: ${sample.condition.toUpperCase()}</span>`;
+
+    html += '<br/><div style="margin-top: 4px;">';
+    html += `💨 ${formatWind(wx.windSpeed, wx.windDir, wx.windAltitude)}`;
+    html += ` | 🌡️ ${formatTemperature(wx.temperature)}`;
+    html += '</div>';
+
+    if (wx.cloudBase != null) {
+        const cloudBaseFt = Math.round(wx.cloudBase * 3.28084);
+        html += `<div>☁️ Ceiling: ${cloudBaseFt} ft AGL`;
+        if (wx.cloudBaseDisplay) {
+            html += ` (${wx.cloudBaseDisplay})`;
+        }
+        html += '</div>';
+    } else {
+        html += '<div>☁️ CLR</div>';
+    }
+
+    if (wx.visibility != null) {
+        html += `<div>👁️ Visibility: ${wx.visibility.toFixed(1)} km`;
+        if (wx.visibility < 5) {
+            html += ' <span style="color: #f44336; font-weight: bold;">LOW</span>';
+        }
+        html += '</div>';
+    }
+
+    if (wx.precipitation != null && wx.precipitation > 0) {
+        html += `<div>🌧️ Precip: ${wx.precipitation.toFixed(1)} mm/h</div>`;
+    }
+
+    html += `<div style="margin-top: 4px; font-size: 10px; color: #888;">`;
+    html += `(${sample.lat.toFixed(4)}, ${sample.lon.toFixed(4)})`;
+    html += '</div>';
+
+    html += '</div>';
+    return html;
+}
+
+/**
  * Clear all map layers
  */
 export function clearMapLayers(): void {
     if (routeLayer) {
         try {
+            routeLayer.clearLayers();
             map.removeLayer(routeLayer);
         } catch (_e) {
             // Windy's GL renderer may throw when removing paths;
@@ -380,6 +566,7 @@ export function clearMapLayers(): void {
 
     if (waypointMarkers) {
         try {
+            waypointMarkers.clearLayers();
             map.removeLayer(waypointMarkers);
         } catch (_e) {
             // Same GL renderer issue with CircleMarker paths
@@ -388,6 +575,14 @@ export function clearMapLayers(): void {
     }
 
     markerMap.clear();
+
+    // Force Leaflet to repaint after layer removal — Windy's GL renderer
+    // sometimes keeps stale tiles unless the map is explicitly invalidated.
+    try {
+        map.invalidateSize({ animate: false });
+    } catch (_e) {
+        // ignore
+    }
 }
 
 /**

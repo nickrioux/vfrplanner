@@ -72,10 +72,12 @@ export function findBracketingWaypoints(
     let cumulativeDistance = 0;
 
     // Find the segment containing the target distance
+    // wp[i].distance is the incoming leg (from wp[i-1] to wp[i]), so the leg
+    // from wp[i] to wp[i+1] has length wp[i+1].distance
     for (let i = 0; i < waypoints.length - 1; i++) {
         const prevWp = waypoints[i];
         const nextWp = waypoints[i + 1];
-        const legDistance = prevWp.distance || 0;
+        const legDistance = nextWp.distance || 0;
         const nextCumulativeDistance = cumulativeDistance + legDistance;
 
         if (distance >= cumulativeDistance && distance <= nextCumulativeDistance) {
@@ -105,7 +107,7 @@ export function findBracketingWaypoints(
             nextWaypoint: waypoints[lastIndex],
             prevIndex: lastIndex - 1,
             nextIndex: lastIndex,
-            prevDistance: cumulativeDistance - (waypoints[lastIndex - 1].distance || 0),
+            prevDistance: cumulativeDistance - (waypoints[lastIndex].distance || 0),
             nextDistance: cumulativeDistance,
             fraction: 1.0
         };
@@ -237,4 +239,56 @@ export function interpolateBearing(
     // Use the bearing of the segment we're in (from prevWaypoint)
     // Bearing doesn't change much within a segment, so use the segment's bearing
     return bracket.prevWaypoint.bearing;
+}
+
+/**
+ * Interpolate lat/lon at a given distance along the route using great circle interpolation
+ * @param distance - Distance along route in NM
+ * @param waypoints - Array of waypoints
+ * @returns Interpolated lat/lon, or null if distance is out of range
+ */
+export function getLatLonAtDistance(
+    distance: number,
+    waypoints: Waypoint[]
+): { lat: number; lon: number } | null {
+    if (waypoints.length === 0) return null;
+    if (waypoints.length === 1) return { lat: waypoints[0].lat, lon: waypoints[0].lon };
+
+    let cumulativeDistance = 0;
+
+    for (let i = 0; i < waypoints.length - 1; i++) {
+        const wp1 = waypoints[i];
+        const wp2 = waypoints[i + 1];
+        // wp[i+1].distance is the incoming leg length (from wp[i] to wp[i+1])
+        const legDistance = wp2.distance || 0;
+
+        if (distance <= cumulativeDistance + legDistance) {
+            const fraction = legDistance > 0 ? (distance - cumulativeDistance) / legDistance : 0;
+            // Great circle interpolation
+            const φ1 = wp1.lat * Math.PI / 180;
+            const λ1 = wp1.lon * Math.PI / 180;
+            const φ2 = wp2.lat * Math.PI / 180;
+            const λ2 = wp2.lon * Math.PI / 180;
+            const d = 2 * Math.asin(Math.sqrt(
+                Math.sin((φ2 - φ1) / 2) ** 2 +
+                Math.cos(φ1) * Math.cos(φ2) * Math.sin((λ2 - λ1) / 2) ** 2
+            ));
+            if (d < 1e-10) return { lat: wp1.lat, lon: wp1.lon };
+            const a = Math.sin((1 - fraction) * d) / Math.sin(d);
+            const b = Math.sin(fraction * d) / Math.sin(d);
+            const x = a * Math.cos(φ1) * Math.cos(λ1) + b * Math.cos(φ2) * Math.cos(λ2);
+            const y = a * Math.cos(φ1) * Math.sin(λ1) + b * Math.cos(φ2) * Math.sin(λ2);
+            const z = a * Math.sin(φ1) + b * Math.sin(φ2);
+            return {
+                lat: Math.atan2(z, Math.sqrt(x ** 2 + y ** 2)) * 180 / Math.PI,
+                lon: Math.atan2(y, x) * 180 / Math.PI,
+            };
+        }
+
+        cumulativeDistance += legDistance;
+    }
+
+    // Beyond route end
+    const last = waypoints[waypoints.length - 1];
+    return { lat: last.lat, lon: last.lon };
 }

@@ -207,74 +207,47 @@
             {:else if activeTab === 'settings'}
                 <section>
                     <h3>Settings</h3>
+                    <p>Settings are organized into collapsible sections. All sections are open by default.</p>
 
-                    <h4>Aircraft Category</h4>
-                    <p>Select your aircraft type for appropriate VFR minimums:</p>
+                    <h4>Aircraft &amp; Regulations</h4>
                     <ul>
-                        <li><strong>Airplane (Default):</strong> Standard VFR minimums for fixed-wing aircraft</li>
-                        <li><strong>Helicopter:</strong> Lower visibility minimums as allowed by regulations:
-                            <ul>
-                                <li>Canada (TC): 1.0 SM (1.6 km) minimum visibility</li>
-                                <li>USA (FAA): 0.5 SM (0.8 km) minimum visibility</li>
-                                <li>Europe (EASA): 800m minimum visibility</li>
-                            </ul>
-                        </li>
-                    </ul>
-                    <p><em>Note: Helicopters also have lower terrain and cloud clearance requirements due to their ability to hover and maneuver at low altitudes.</em></p>
-
-                    <h4>Regulatory Region</h4>
-                    <p>Select your operating region for accurate VFR minimums. This is especially important for helicopters, as visibility minimums vary significantly between regions.</p>
-
-                    <h4>VFR Condition Thresholds</h4>
-                    <p>Choose how strictly to evaluate VFR conditions:</p>
-                    <ul>
-                        <li><strong>Standard VFR:</strong> Typical VFR minimums (ceiling &gt; 3000ft, visibility &gt; 9km)</li>
-                        <li><strong>Conservative:</strong> Higher minimums for extra safety margin</li>
-                        <li><strong>Custom:</strong> Define your own ceiling, visibility, wind, and clearance limits</li>
-                    </ul>
-                    <p><em>When Helicopter is selected, thresholds are automatically adjusted to region-specific minimums unless Custom is chosen.</em></p>
-
-                    <h4>Default Airspeed (TAS)</h4>
-                    <p>True airspeed used for calculating estimated time enroute (ETE) and ground speed when wind data is available. Set this to your typical cruise TAS.</p>
-
-                    <h4>Default Altitude</h4>
-                    <p>Default cruise altitude for new waypoints when creating or importing a flight plan.</p>
-
-                    <h4>Auto Terrain Elevation</h4>
-                    <p>When enabled, automatically fetches terrain elevation for departure and arrival airports. Useful for accurate altitude profile display.</p>
-
-                    <h4>Show Waypoint Labels</h4>
-                    <p>Toggle permanent waypoint name labels on the map. When disabled, labels only appear on hover.</p>
-
-                    <h4>Include Night Hours</h4>
-                    <p>Controls whether VFR window search includes nighttime hours:</p>
-                    <ul>
-                        <li><strong>Enabled:</strong> Search all hours (24/7)</li>
-                        <li><strong>Disabled:</strong> Limit to 30 min before sunrise to 30 min after sunset</li>
+                        <li><strong>Aircraft Category:</strong> Airplane or Helicopter. Helicopters have lower visibility minimums.</li>
+                        <li><strong>Regulatory Region:</strong> Canada (TC), USA (FAA), or Europe (EASA). Affects VFR minimums, especially for helicopters.</li>
+                        <li><strong>Aircraft Performance:</strong> Configure cruise TAS, altitude, and climb/descent rates.</li>
                     </ul>
 
-                    <h4>Max VFR Windows</h4>
-                    <p>Maximum number of VFR windows to find during a search. The search covers the entire forecast period available from the current Windy weather model.</p>
-
-                    <h4>Terrain Sample Interval</h4>
-                    <p>Distance between elevation samples along your route. Lower values give more terrain detail but take longer to load. Recommended: 1-3 NM.</p>
-
-                    <h4>Profile Top Height</h4>
-                    <p>Maximum altitude displayed on the altitude profile graph. Adjust based on your typical cruise altitude.</p>
-
-                    <h4>AirportDB API Key</h4>
-                    <p>Optional API key for enhanced airport data:</p>
+                    <h4>VFR Conditions</h4>
                     <ul>
-                        <li><strong>Without key:</strong> Offline data for large/medium airports in North America and Europe</li>
-                        <li><strong>With key:</strong> Global coverage including small airports and navaids (VOR, NDB)</li>
+                        <li><strong>VFR Condition Thresholds:</strong> Standard, Conservative, or Custom ceiling/visibility/wind limits for profile coloring.</li>
+                        <li><strong>Include Night Hours:</strong> When disabled, VFR windows are limited to 30 min before sunrise to 30 min after sunset.</li>
+                        <li><strong>Max VFR Windows:</strong> How many departure windows to find across the forecast period.</li>
                     </ul>
-                    <p>Get a free API key at airportdb.io</p>
+
+                    <h4>Route Sampling</h4>
+                    <ul>
+                        <li><strong>Terrain Sample Interval:</strong> Distance between elevation samples (lower = finer detail). Recommended: 1-3 NM.</li>
+                        <li><strong>Sample weather along route:</strong> Fetch weather at intermediate points for better en-route alert coverage.</li>
+                        <li><strong>Weather Sample Interval:</strong> Distance between weather samples (shown when route sampling is enabled).</li>
+                    </ul>
+
+                    <h4>Display</h4>
+                    <ul>
+                        <li><strong>Profile Top Height:</strong> Maximum altitude on the altitude profile graph.</li>
+                        <li><strong>Show Waypoint Labels:</strong> Toggle permanent labels on the map.</li>
+                        <li><strong>Auto Terrain Elevation:</strong> Auto-set field elevation for departure/arrival.</li>
+                        <li><strong>Show Weather Sample Markers:</strong> Display sample points on the map (when route sampling is enabled).</li>
+                    </ul>
+
+                    <h4>Data Sources</h4>
+                    <ul>
+                        <li><strong>AirportDB API Key:</strong> Optional. Without it, offline data covers large/medium airports in North America and Europe. With it, global coverage including small airports and navaids.</li>
+                    </ul>
                 </section>
             {/if}
         </div>
 
         <div class="help-footer">
-            <span class="version">VFR Flight Planner v1.0.1</span>
+            <span class="version">VFR Flight Planner v1.0.5</span>
         </div>
     </div>
 </div>
