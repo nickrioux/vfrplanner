@@ -420,6 +420,18 @@
                     on:minConditionChange={(e) => vfrWindowStore.setMinCondition(e.detail)}
                 />
             {/if}
+
+            <!-- AI: VFR Window Briefing -->
+            {#if aiEnabled && vfrWindows && vfrWindows.length > 0}
+                <AIBriefingCard
+                    title="VFR Window Briefing"
+                    content={aiWindowBriefing}
+                    isLoading={aiWindowBriefingLoading}
+                    error={aiWindowBriefingError}
+                    on:generate={generateWindowBriefing}
+                    on:refresh={generateWindowBriefing}
+                />
+            {/if}
         {/if}
 
         <!-- Waypoint Table -->
@@ -444,6 +456,18 @@
                 on:moveWaypointDown={(e) => moveWaypointDown(e.detail)}
                 on:deleteWaypoint={(e) => deleteWaypoint(e.detail)}
             />
+
+            <!-- AI: Route Weather Summary -->
+            {#if aiEnabled && weatherData.size > 0}
+                <AIBriefingCard
+                    title="Route Weather Summary"
+                    content={aiRouteSummary}
+                    isLoading={aiRouteSummaryLoading}
+                    error={aiRouteSummaryError}
+                    on:generate={generateRouteSummary}
+                    on:refresh={generateRouteSummary}
+                />
+            {/if}
 
             <div class="setting-info">
                 <p>Tip: Use the Edit button to add, move, or insert waypoints on the map. Press Escape to exit edit mode.</p>
@@ -565,6 +589,8 @@
     import HelpModal from './components/HelpModal.svelte';
     import AboutTab from './components/AboutTab.svelte';
     import DepartureSlider from './components/DepartureSlider.svelte';
+    import AIBriefingCard from './components/AIBriefingCard.svelte';
+    import { LLMService } from './services/llmService';
     import { createSessionStorage } from './services/sessionStorage';
     import { routeStore, type RouteSettings } from './stores/routeStore';
     import {
@@ -645,6 +671,15 @@
     let showAircraftConfig = false;
     let showHelpModal = false;
 
+    // AI briefing state
+    let llmService: LLMService | null = null;
+    let aiWindowBriefing: string | null = null;
+    let aiWindowBriefingLoading = false;
+    let aiWindowBriefingError: string | null = null;
+    let aiRouteSummary: string | null = null;
+    let aiRouteSummaryLoading = false;
+    let aiRouteSummaryError: string | null = null;
+
     // AirportDB search state
     let searchQuery = '';
     let searchResults: { airports: AirportDBResult[]; navaids: AirportDBNavaid[] } = { airports: [], navaids: [] };
@@ -688,10 +723,54 @@
      */
     function resetRoutePanel() {
         resetWeatherState();
+        aiWindowBriefing = null;
+        aiWindowBriefingError = null;
+        aiRouteSummary = null;
+        aiRouteSummaryError = null;
     }
 
     // Settings - reactive subscription to settingsStore
     $: settings = $settingsStore;
+
+    // LLM service - create/update when AI settings change
+    $: if (settings.llmEnabled && settings.llmApiKey) {
+        const config = { provider: settings.llmProvider, apiKey: settings.llmApiKey, model: settings.llmModel };
+        if (llmService) {
+            llmService.updateConfig(config);
+        } else {
+            llmService = new LLMService(config);
+        }
+    } else {
+        llmService = null;
+    }
+
+    $: aiEnabled = !!llmService;
+
+    async function generateWindowBriefing() {
+        if (!llmService || !flightPlan || !vfrWindows || vfrWindows.length === 0) return;
+        aiWindowBriefingLoading = true;
+        aiWindowBriefingError = null;
+        try {
+            aiWindowBriefing = await llmService.briefVFRWindows(vfrWindows, flightPlan);
+        } catch (err) {
+            aiWindowBriefingError = err instanceof Error ? err.message : 'Failed to generate briefing';
+        } finally {
+            aiWindowBriefingLoading = false;
+        }
+    }
+
+    async function generateRouteSummary() {
+        if (!llmService || !flightPlan || weatherData.size === 0) return;
+        aiRouteSummaryLoading = true;
+        aiRouteSummaryError = null;
+        try {
+            aiRouteSummary = await llmService.summarizeRouteWeather(weatherData, weatherAlerts, flightPlan);
+        } catch (err) {
+            aiRouteSummaryError = err instanceof Error ? err.message : 'Failed to generate summary';
+        } finally {
+            aiRouteSummaryLoading = false;
+        }
+    }
 
     // Airport provider - automatically uses fallback when no API key
     // Uses reactive statement to update when API key changes
@@ -1054,6 +1133,9 @@
      * Delegates to weatherController
      */
     async function handleReadWeather() {
+        // Clear stale AI summaries before re-fetching
+        aiRouteSummary = null;
+        aiRouteSummaryError = null;
         await fetchWeatherForRoute();
         saveSession();
     }
@@ -1299,6 +1381,8 @@
         vfrWindowStore.setProgress(0);
         vfrWindowStore.setError(null);
         vfrWindowStore.setWindows(null);
+        aiWindowBriefing = null;
+        aiWindowBriefingError = null;
 
         try {
             // Use aircraft-aware thresholds for VFR window search

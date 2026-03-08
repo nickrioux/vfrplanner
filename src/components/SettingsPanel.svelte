@@ -2,6 +2,8 @@
     import { createEventDispatcher } from 'svelte';
     import type { FlightPlan } from '../types';
     import type { ConditionPreset } from '../types/conditionThresholds';
+    import type { LLMProvider } from '../types/llm';
+    import { MODELS_BY_PROVIDER, LLM_PROVIDER_CONFIGS } from '../types/llm';
     import { settingsStore } from '../stores/settingsStore';
 
     export let maxProfileAltitude: number;
@@ -108,6 +110,93 @@ function handleWeatherSampleEnabledChange(e: Event) {
             handleChange();
         }
     }
+
+    // LLM settings handlers
+    let showApiKey = false;
+    let llmTestStatus: 'idle' | 'testing' | 'success' | 'error' = 'idle';
+    let llmTestError = '';
+    function handleLlmEnabledChange(e: Event) {
+        const checked = (e.target as HTMLInputElement).checked;
+        settingsStore.setLlmEnabled(checked);
+        handleChange();
+    }
+
+    function handleLlmProviderChange(e: Event) {
+        const value = (e.target as HTMLSelectElement).value as LLMProvider;
+        settingsStore.setLlmProvider(value);
+        llmTestStatus = 'idle';
+        handleChange();
+    }
+
+    function handleLlmModelChange(e: Event) {
+        const value = (e.target as HTMLSelectElement).value;
+        settingsStore.setLlmModel(value);
+        handleChange();
+    }
+
+    function handleLlmApiKeyChange(e: Event) {
+        const value = (e.target as HTMLInputElement).value;
+        settingsStore.setLlmApiKey(value);
+        llmTestStatus = 'idle';
+        handleChange();
+    }
+
+    async function handleTestConnection() {
+        if (!settings.llmApiKey) {
+            llmTestStatus = 'error';
+            llmTestError = 'No API key configured';
+            return;
+        }
+        llmTestStatus = 'testing';
+        llmTestError = '';
+
+        const providerConfig = LLM_PROVIDER_CONFIGS[settings.llmProvider];
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            [providerConfig.authHeader]: providerConfig.authPrefix + settings.llmApiKey,
+            ...providerConfig.extraHeaders,
+        };
+
+        // Build a minimal request body depending on provider
+        let body: string;
+        if (settings.llmProvider === 'anthropic') {
+            headers['anthropic-version'] = '2023-06-01';
+            body = JSON.stringify({
+                model: settings.llmModel || 'claude-haiku-4-5-20251001',
+                max_tokens: 16,
+                messages: [{ role: 'user', content: 'Hi' }],
+            });
+        } else {
+            // OpenAI-compatible (openai + openrouter)
+            body = JSON.stringify({
+                model: settings.llmModel,
+                max_tokens: 16,
+                messages: [{ role: 'user', content: 'Hi' }],
+            });
+        }
+
+        try {
+            const res = await fetch(providerConfig.endpoint, {
+                method: 'POST',
+                headers,
+                body,
+            });
+            if (res.ok) {
+                llmTestStatus = 'success';
+            } else {
+                const data = await res.json().catch(() => null);
+                const msg = data?.error?.message || `HTTP ${res.status}`;
+                llmTestStatus = 'error';
+                llmTestError = msg;
+            }
+        } catch (err) {
+            llmTestStatus = 'error';
+            llmTestError = err instanceof Error ? err.message : 'Network error';
+        }
+    }
+
+    $: showModelSelector = settings.llmProvider !== 'openrouter';
+    $: availableModels = MODELS_BY_PROVIDER[settings.llmProvider] || [];
 
     $: totalDistance = flightPlan?.totals.distance || 0;
     $: estimatedWeatherSamples = settings.weatherSampleEnabled && totalDistance > 0
@@ -357,6 +446,115 @@ function handleWeatherSampleEnabledChange(e: Event) {
             </div>
         </div>
     </details>
+
+    <!-- AI Assistant -->
+    <details class="settings-group">
+        <summary class="settings-group-header">AI Assistant</summary>
+        <div class="settings-group-content">
+            <div class="setting-group">
+                <label class="setting-checkbox">
+                    <input
+                        type="checkbox"
+                        checked={settings.llmEnabled}
+                        on:change={handleLlmEnabledChange}
+                    />
+                    Enable AI Features
+                </label>
+                <div class="setting-description">
+                    Get natural language weather briefings and route analysis powered by AI.
+                    Requires an API key from your chosen provider.
+                </div>
+            </div>
+
+            {#if settings.llmEnabled}
+                <div class="setting-group">
+                    <label class="setting-label">Provider</label>
+                    <div class="setting-input">
+                        <select value={settings.llmProvider} on:change={handleLlmProviderChange}>
+                            <option value="openrouter">OpenRouter (Recommended)</option>
+                            <option value="anthropic">Anthropic (Claude)</option>
+                            <option value="openai">OpenAI (GPT)</option>
+                        </select>
+                    </div>
+                    {#if settings.llmProvider === 'openrouter'}
+                        <div class="setting-description">
+                            Auto-routes to the best model for each request. Browser-friendly.
+                            Get a key at <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai</a>
+                        </div>
+                    {:else if settings.llmProvider === 'anthropic'}
+                        <div class="setting-description">
+                            Direct Anthropic API. May have CORS issues in some browsers.
+                            Get a key at <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>
+                        </div>
+                    {:else}
+                        <div class="setting-description">
+                            Direct OpenAI API. May have CORS issues in some browsers.
+                            Get a key at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com</a>
+                        </div>
+                    {/if}
+                </div>
+
+                {#if showModelSelector}
+                    <div class="setting-group">
+                        <label class="setting-label">Model</label>
+                        <div class="setting-input">
+                            <select
+                                value={settings.llmModel}
+                                on:change={handleLlmModelChange}
+                            >
+                                {#each availableModels as model}
+                                    <option value={model.id}>{model.label}</option>
+                                {/each}
+                            </select>
+                        </div>
+                        <div class="setting-description">
+                            Haiku/Mini models are fast and low-cost, ideal for briefings. Sonnet/GPT-4o are better for the AI chat.
+                        </div>
+                    </div>
+                {/if}
+
+                <div class="setting-group">
+                    <label class="setting-label">API Key</label>
+                    <div class="api-key-wrapper">
+                        <input
+                            type={showApiKey ? 'text' : 'password'}
+                            class="setting-input api-key-input"
+                            value={settings.llmApiKey}
+                            on:change={handleLlmApiKeyChange}
+                            placeholder="Enter your API key"
+                        />
+                        <button
+                            class="toggle-visibility-btn"
+                            on:click={() => showApiKey = !showApiKey}
+                            title={showApiKey ? 'Hide key' : 'Show key'}
+                        >
+                            {showApiKey ? 'Hide' : 'Show'}
+                        </button>
+                    </div>
+                    <div class="setting-description">
+                        Your key is stored locally and only sent to the selected provider.
+                    </div>
+                </div>
+
+                <div class="setting-group">
+                    <button class="customize-btn" on:click={handleTestConnection} disabled={llmTestStatus === 'testing'}>
+                        {llmTestStatus === 'testing' ? 'Testing...' : 'Test Connection'}
+                    </button>
+                    <div class="llm-status" class:status-success={llmTestStatus === 'success'} class:status-error={llmTestStatus === 'error'}>
+                        {#if llmTestStatus === 'success'}
+                            <span class="status-dot connected"></span> Connected
+                        {:else if llmTestStatus === 'error'}
+                            <span class="status-dot error"></span> {llmTestError || 'Invalid key'}
+                        {:else if settings.llmApiKey}
+                            <span class="status-dot idle"></span> Not tested
+                        {:else}
+                            <span class="status-dot idle"></span> Not configured
+                        {/if}
+                    </div>
+                </div>
+            {/if}
+        </div>
+    </details>
 </div>
 
 <style lang="less">
@@ -536,6 +734,73 @@ function handleWeatherSampleEnabledChange(e: Event) {
         &:focus {
             outline: 2px solid rgba(74, 144, 217, 0.5);
             outline-offset: 2px;
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    }
+
+    .api-key-wrapper {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+
+        .api-key-input {
+            flex: 1;
+        }
+    }
+
+    .toggle-visibility-btn {
+        padding: 6px 10px;
+        background: #333;
+        border: 1px solid #555;
+        border-radius: 4px;
+        color: #ccc;
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+
+        &:hover {
+            background: #444;
+            color: #fff;
+        }
+    }
+
+    .llm-status {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #888;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+
+        &.status-success {
+            color: #4caf50;
+        }
+
+        &.status-error {
+            color: #f44336;
+        }
+    }
+
+    .status-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+
+        &.connected {
+            background: #4caf50;
+        }
+
+        &.error {
+            background: #f44336;
+        }
+
+        &.idle {
+            background: #666;
         }
     }
 </style>

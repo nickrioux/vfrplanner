@@ -8,6 +8,8 @@ import type { PluginSettings, AircraftPerformance } from '../types/settings';
 import { DEFAULT_SETTINGS } from '../types/settings';
 import type { VfrConditionThresholds, ConditionPreset } from '../types/conditionThresholds';
 import { getThresholdsForPreset } from '../types/conditionThresholds';
+import type { LLMProvider } from '../types/llm';
+import { DEFAULT_MODEL_BY_PROVIDER } from '../types/llm';
 
 /**
  * Settings state interface
@@ -189,6 +191,38 @@ function createSettingsStore() {
                 aircraftPerformance: perf,
                 defaultAirspeed: perf.cruiseTAS,
                 defaultAltitude: perf.cruiseAltitude,
+            }));
+        },
+
+        /**
+         * Set LLM enabled
+         */
+        setLlmEnabled: (enabled: boolean) => {
+            update(state => ({ ...state, llmEnabled: enabled }));
+        },
+
+        /**
+         * Set LLM API key
+         */
+        setLlmApiKey: (apiKey: string) => {
+            update(state => ({ ...state, llmApiKey: apiKey }));
+        },
+
+        /**
+         * Set LLM model
+         */
+        setLlmModel: (model: string) => {
+            update(state => ({ ...state, llmModel: model }));
+        },
+
+        /**
+         * Set LLM provider (resets model to provider default).
+         */
+        setLlmProvider: (provider: LLMProvider) => {
+            update(state => ({
+                ...state,
+                llmProvider: provider,
+                llmModel: DEFAULT_MODEL_BY_PROVIDER[provider],
             }));
         },
     };

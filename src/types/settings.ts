@@ -4,6 +4,7 @@
 
 import type { VfrConditionThresholds, ConditionPreset, AircraftCategory, Region } from './conditionThresholds';
 import { STANDARD_THRESHOLDS } from './conditionThresholds';
+import type { LLMProvider } from './llm';
 
 export interface AircraftPerformance {
     cruiseTAS: number;        // True Airspeed in knots
@@ -70,6 +71,12 @@ export interface PluginSettings {
 
     // Aircraft performance
     aircraftPerformance: AircraftPerformance;
+
+    // LLM / AI settings
+    llmEnabled: boolean;
+    llmApiKey: string;
+    llmModel: string;  // model ID or 'openrouter/auto' for auto-routing
+    llmProvider: LLMProvider;
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -93,4 +100,10 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     aircraftCategory: 'airplane',
     region: 'canada',
     aircraftPerformance: { ...DEFAULT_AIRCRAFT_PERFORMANCE },
+
+    // LLM / AI defaults
+    llmEnabled: false,
+    llmApiKey: '',
+    llmModel: 'openrouter/auto',
+    llmProvider: 'openrouter',
 };

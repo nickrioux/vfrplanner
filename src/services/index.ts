@@ -12,6 +12,8 @@ export * from './vfrWindowService';
 export * from './weatherHelpers';
 export * from './vfrConditionRules';
 
+export { LLMService } from './llmService';
+
 // Re-export with namespaces to avoid naming conflicts
 export * as airportdb from './airportdbService';
 export * as openaip from './openaipService';
