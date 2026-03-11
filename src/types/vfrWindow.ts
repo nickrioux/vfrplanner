@@ -3,7 +3,7 @@
  * Types for detecting and representing time windows with acceptable VFR conditions
  */
 
-import type { SegmentCondition } from '../services/profileService';
+import type { SegmentCondition } from './weather';
 import type { VfrConditionThresholds } from './conditionThresholds';
 
 /**

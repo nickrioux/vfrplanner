@@ -13,25 +13,33 @@
 </script>
 
 {#if hasFlightPlan}
-    <div class="tabs">
+    <div class="tabs" role="tablist" aria-label="Plugin navigation">
         <button
             class="tab"
+            role="tab"
+            aria-selected={activeTab === 'route'}
             class:active={activeTab === 'route'}
             on:click={() => handleTabClick('route')}
         >Route</button>
         <button
             class="tab"
+            role="tab"
+            aria-selected={activeTab === 'profile'}
             class:active={activeTab === 'profile'}
             on:click={() => handleTabClick('profile')}
             disabled={!canShowProfile}
         >Profile</button>
         <button
             class="tab"
+            role="tab"
+            aria-selected={activeTab === 'settings'}
             class:active={activeTab === 'settings'}
             on:click={() => handleTabClick('settings')}
         >Settings</button>
         <button
             class="tab"
+            role="tab"
+            aria-selected={activeTab === 'about'}
             class:active={activeTab === 'about'}
             on:click={() => handleTabClick('about')}
         >About</button>

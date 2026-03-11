@@ -75,9 +75,10 @@
 
         {#if vfrWindows && vfrWindows.length > 0}
             <div class="vfr-windows-list">
-                {#each vfrWindows as window}
+                {#each vfrWindows as window, i}
                     {@const formatted = formatVFRWindow(window)}
                     <div class="vfr-window-item" class:good={window.worstCondition === 'good'} class:marginal={window.worstCondition === 'marginal'}>
+                        <span class="window-number">{i + 1}</span>
                         <div class="window-info">
                             <span class="window-date">{formatted.date}</span>
                             <span class="window-time">{formatted.timeRange}</span>
@@ -381,6 +382,20 @@
         &.marginal {
             border-left-color: #ff9800;
         }
+    }
+
+    .window-number {
+        flex-shrink: 0;
+        width: 20px;
+        height: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.12);
+        font-size: 10px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.7);
     }
 
     .window-info {

@@ -80,7 +80,7 @@ export async function fetchEcmwfCbase(
             return null;
         }
 
-        const cbaseData = data['cbase-surface'] || data.cbase;
+        const cbaseData = data.cbase;
         const timestamps = data.ts || data['ts-surface'];
 
         if (!cbaseData || !Array.isArray(cbaseData) || cbaseData.length === 0) {

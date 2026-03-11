@@ -1,252 +1,124 @@
 /**
- * Basic E2E Tests for VFR Planner Plugin
+ * 01 - Plugin Loading & Initialization
+ * Verifies the plugin loads correctly in the Windy dev environment.
  *
- * These tests verify the plugin integration with the Windy platform.
- * Run with: npx playwright test
- *
- * Note: Some tests require the plugin to be installed on Windy.
- * For local development, use the Windy Plugin Development environment.
+ * Optimized: Groups read-only tests into serial blocks sharing a single
+ * browser page to avoid repeated navigation overhead.
  */
 
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import {
+    AUTH_FILE,
+    TIMEOUTS,
+    waitForWindyLoad,
+    openPluginPage,
+    importFPLFixture,
+} from './helpers/plugin-helpers';
 
-// Plugin URL on Windy (update with actual plugin URL)
-const PLUGIN_URL = 'https://www.windy.com/plugins/windy-plugin-vfr-planner';
+test.describe('Plugin Loading & Initialization', () => {
+    /** Tests that only need the Windy platform (no plugin) */
+    test.describe.serial('Windy platform checks', () => {
+        let page: Page;
+        let context: BrowserContext;
 
-// Test airports for flight planning
-const TEST_AIRPORTS = {
-    departure: { icao: 'CYUL', name: 'Montreal-Trudeau' },
-    arrival: { icao: 'CYQB', name: 'Quebec City' },
-};
+        test.beforeAll(async ({ browser }) => {
+            context = await browser.newContext({
+                storageState: AUTH_FILE,
+                ignoreHTTPSErrors: true,
+            });
+            page = await context.newPage();
+            await page.goto('https://www.windy.com/');
+            await waitForWindyLoad(page);
+        });
 
-/**
- * Helper to wait for Windy to fully load
- */
-async function waitForWindyLoad(page: Page): Promise<void> {
-    // Wait for the Windy map to be ready
-    await page.waitForSelector('#map-container', { state: 'visible', timeout: 30000 });
-    // Wait for weather data to load
-    await page.waitForFunction(() => {
-        return window.W !== undefined && window.W.store !== undefined;
-    }, { timeout: 30000 });
-}
+        test.afterAll(async () => {
+            await context.close();
+        });
 
-/**
- * Helper to open the plugin panel
- */
-async function openPlugin(page: Page): Promise<void> {
-    // Click on the plugins menu
-    const pluginButton = page.locator('[data-plugin="vfr-planner"]');
-    if (await pluginButton.isVisible()) {
-        await pluginButton.click();
-    } else {
-        // Try alternate method via menu
-        await page.click('[data-menu="plugins"]');
-        await page.click('text=VFR Planner');
-    }
-    // Wait for plugin panel to open
-    await page.waitForSelector('.vfr-planner-panel', { state: 'visible', timeout: 10000 });
-}
+        test('Windy platform loads with map container', async () => {
+            await expect(page.locator('#map-container')).toBeVisible();
+        });
 
-test.describe('VFR Planner Plugin - Basic Tests', () => {
-    test.beforeEach(async ({ page }) => {
-        // Navigate to Windy
-        await page.goto('https://www.windy.com');
-        await waitForWindyLoad(page);
+        test('Windy W global is available with store API', async () => {
+            const hasStore = await page.evaluate(() => {
+                return typeof window.W?.store?.get === 'function';
+            });
+            expect(hasStore).toBe(true);
+        });
     });
 
-    test('Windy platform loads correctly', async ({ page }) => {
-        // Verify Windy loaded
-        await expect(page).toHaveTitle(/Windy/);
+    /** Tests that need the plugin loaded (read-only after load) */
+    test.describe.serial('Plugin load checks', () => {
+        let page: Page;
+        let context: BrowserContext;
 
-        // Verify map is visible
-        const mapContainer = page.locator('#map-container');
-        await expect(mapContainer).toBeVisible();
+        test.beforeAll(async ({ browser }) => {
+            context = await browser.newContext({
+                storageState: AUTH_FILE,
+                ignoreHTTPSErrors: true,
+            });
+            page = await context.newPage();
+            await openPluginPage(page);
+        });
+
+        test.afterAll(async () => {
+            await context.close();
+        });
+
+        test('Plugin panel auto-opens in dev mode', async () => {
+            await expect(page.locator('.drop-zone')).toBeVisible();
+        });
+
+        test('Plugin shows import section with buttons', async () => {
+            await expect(page.locator('.import-section')).toBeVisible();
+            await expect(page.locator('.drop-zone')).toBeVisible();
+        });
+
+        test('Browse and New Plan buttons are visible', async () => {
+            await expect(page.locator('.btn-browse')).toBeVisible();
+            await expect(page.locator('.btn-new')).toBeVisible();
+        });
     });
 
-    test.skip('Plugin panel opens and closes', async ({ page }) => {
-        // This test requires the plugin to be installed
-        await openPlugin(page);
+    /** Tests that need the plugin loaded AND a flight plan imported */
+    test.describe.serial('Plugin with imported plan', () => {
+        let page: Page;
+        let context: BrowserContext;
 
-        // Verify plugin panel is visible
-        const panel = page.locator('.vfr-planner-panel');
-        await expect(panel).toBeVisible();
+        test.beforeAll(async ({ browser }) => {
+            context = await browser.newContext({
+                storageState: AUTH_FILE,
+                ignoreHTTPSErrors: true,
+            });
+            page = await context.newPage();
+            await openPluginPage(page);
+            await importFPLFixture(page);
+        });
 
-        // Close the plugin
-        await page.click('.plugin-close-button');
-        await expect(panel).not.toBeVisible();
+        test.afterAll(async () => {
+            await context.close();
+        });
+
+        test('Tabs appear after importing a flight plan', async () => {
+            await expect(page.locator('.tabs')).toBeVisible();
+            await expect(page.locator('.tab:has-text("Route")')).toBeVisible();
+            await expect(page.locator('.tab:has-text("Profile")')).toBeVisible();
+            await expect(page.locator('.tab:has-text("Settings")')).toBeVisible();
+            await expect(page.locator('.tab:has-text("About")')).toBeVisible();
+        });
+
+        test('Route tab is active by default after import', async () => {
+            const routeTab = page.locator('.tab:has-text("Route")');
+            await expect(routeTab).toHaveClass(/active/);
+        });
     });
 
-    test.skip('Can input departure and arrival airports', async ({ page }) => {
-        await openPlugin(page);
-
-        // Enter departure airport
-        const departureInput = page.locator('input[placeholder*="Departure"]');
-        await departureInput.fill(TEST_AIRPORTS.departure.icao);
-
-        // Enter arrival airport
-        const arrivalInput = page.locator('input[placeholder*="Arrival"]');
-        await arrivalInput.fill(TEST_AIRPORTS.arrival.icao);
-
-        // Verify inputs have correct values
-        await expect(departureInput).toHaveValue(TEST_AIRPORTS.departure.icao);
-        await expect(arrivalInput).toHaveValue(TEST_AIRPORTS.arrival.icao);
-    });
-
-    test.skip('Flight plan displays on map', async ({ page }) => {
-        await openPlugin(page);
-
-        // Enter flight plan
-        await page.locator('input[placeholder*="Departure"]').fill(TEST_AIRPORTS.departure.icao);
-        await page.locator('input[placeholder*="Arrival"]').fill(TEST_AIRPORTS.arrival.icao);
-
-        // Click calculate/plan button
-        await page.click('button:has-text("Calculate")');
-
-        // Wait for route to be calculated
-        await page.waitForSelector('.route-line', { state: 'visible', timeout: 15000 });
-
-        // Verify route is displayed
-        const routeLine = page.locator('.route-line');
-        await expect(routeLine).toBeVisible();
-    });
-});
-
-test.describe('VFR Planner Plugin - Weather Integration', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.goto('https://www.windy.com');
-        await waitForWindyLoad(page);
-    });
-
-    test.skip('Weather data loads for waypoints', async ({ page }) => {
-        await openPlugin(page);
-
-        // Enter a simple flight plan
-        await page.locator('input[placeholder*="Departure"]').fill(TEST_AIRPORTS.departure.icao);
-        await page.locator('input[placeholder*="Arrival"]').fill(TEST_AIRPORTS.arrival.icao);
-        await page.click('button:has-text("Calculate")');
-
-        // Wait for weather data
-        await page.waitForSelector('.waypoint-weather', { state: 'visible', timeout: 30000 });
-
-        // Verify weather data is displayed
-        const weatherData = page.locator('.waypoint-weather');
-        await expect(weatherData).toBeVisible();
-
-        // Check for wind speed display
-        const windSpeed = page.locator('text=/\\d+\\s*kt/');
-        await expect(windSpeed.first()).toBeVisible();
-    });
-
-    test.skip('VFR conditions are evaluated', async ({ page }) => {
-        await openPlugin(page);
-
-        // Enter flight plan
-        await page.locator('input[placeholder*="Departure"]').fill(TEST_AIRPORTS.departure.icao);
-        await page.locator('input[placeholder*="Arrival"]').fill(TEST_AIRPORTS.arrival.icao);
-        await page.click('button:has-text("Calculate")');
-
-        // Wait for condition evaluation
-        await page.waitForSelector('.vfr-condition-indicator', { state: 'visible', timeout: 30000 });
-
-        // Verify condition indicator is displayed
-        const conditionIndicator = page.locator('.vfr-condition-indicator');
-        await expect(conditionIndicator).toBeVisible();
+    /** Profile tab disabled test needs its own page (New Plan = empty state) */
+    test('Profile tab is disabled without enough waypoints', async ({ page }) => {
+        await openPluginPage(page);
+        await page.locator('.btn-new').click();
+        await page.waitForSelector('.tabs', { state: 'visible', timeout: TIMEOUTS.import });
+        const profileTab = page.locator('.tab:has-text("Profile")');
+        await expect(profileTab).toBeDisabled();
     });
 });
-
-test.describe('VFR Planner Plugin - Settings', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.goto('https://www.windy.com');
-        await waitForWindyLoad(page);
-    });
-
-    test.skip('Settings panel opens', async ({ page }) => {
-        await openPlugin(page);
-
-        // Click settings button
-        await page.click('button[aria-label="Settings"]');
-
-        // Verify settings panel is visible
-        const settingsPanel = page.locator('.settings-panel');
-        await expect(settingsPanel).toBeVisible();
-    });
-
-    test.skip('Aircraft settings can be modified', async ({ page }) => {
-        await openPlugin(page);
-        await page.click('button[aria-label="Settings"]');
-
-        // Find aircraft speed input
-        const speedInput = page.locator('input[name="cruiseSpeed"]');
-        await speedInput.fill('120');
-
-        // Verify value is updated
-        await expect(speedInput).toHaveValue('120');
-    });
-});
-
-test.describe('VFR Planner Plugin - Export', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.goto('https://www.windy.com');
-        await waitForWindyLoad(page);
-    });
-
-    test.skip('Can export flight plan as GPX', async ({ page }) => {
-        await openPlugin(page);
-
-        // Enter flight plan
-        await page.locator('input[placeholder*="Departure"]').fill(TEST_AIRPORTS.departure.icao);
-        await page.locator('input[placeholder*="Arrival"]').fill(TEST_AIRPORTS.arrival.icao);
-        await page.click('button:has-text("Calculate")');
-
-        // Wait for route calculation
-        await page.waitForSelector('.route-line', { state: 'visible', timeout: 15000 });
-
-        // Setup download listener
-        const downloadPromise = page.waitForEvent('download');
-
-        // Click export button
-        await page.click('button:has-text("Export GPX")');
-
-        // Verify download started
-        const download = await downloadPromise;
-        expect(download.suggestedFilename()).toContain('.gpx');
-    });
-});
-
-test.describe('VFR Planner Plugin - Accessibility', () => {
-    test.beforeEach(async ({ page }) => {
-        await page.goto('https://www.windy.com');
-        await waitForWindyLoad(page);
-    });
-
-    test.skip('Plugin has accessible labels', async ({ page }) => {
-        await openPlugin(page);
-
-        // Check for accessible input labels
-        const departureInput = page.locator('input[placeholder*="Departure"]');
-        const ariaLabel = await departureInput.getAttribute('aria-label');
-        expect(ariaLabel || await departureInput.getAttribute('id')).toBeTruthy();
-    });
-
-    test.skip('Keyboard navigation works', async ({ page }) => {
-        await openPlugin(page);
-
-        // Tab through form elements
-        await page.keyboard.press('Tab');
-
-        // Verify focus is on first input
-        const focusedElement = page.locator(':focus');
-        await expect(focusedElement).toBeVisible();
-    });
-});
-
-// Type declarations for Windy global
-declare global {
-    interface Window {
-        W: {
-            store: unknown;
-            plugins: unknown;
-        };
-    }
-}

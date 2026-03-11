@@ -43,6 +43,8 @@ interface SampleCache {
     routeKey: string;
     /** Exact departure time that was used for the fetch */
     departureTime: number;
+    /** Whether ETA-adjusted times were used */
+    adjustForFlightTime: boolean;
     /** Cached results */
     samples: RouteWeatherSample[];
 }
@@ -110,6 +112,7 @@ export async function fetchRouteWeatherSamples(
     plannedAltitude: number,
     pluginName: string,
     enableLogging: boolean = false,
+    adjustForFlightTime: boolean = true,
 ): Promise<RouteWeatherSample[]> {
     if (waypoints.length < 2 || airspeedKnots <= 0) {
         return [];
@@ -121,7 +124,7 @@ export async function fetchRouteWeatherSamples(
     // Check cache — skip re-fetch only if same route AND same departure time
     const routeKey = buildRouteKey(waypoints, interval);
 
-    if (sampleCache && sampleCache.routeKey === routeKey && sampleCache.departureTime === departureTime) {
+    if (sampleCache && sampleCache.routeKey === routeKey && sampleCache.departureTime === departureTime && sampleCache.adjustForFlightTime === adjustForFlightTime) {
         if (enableLogging) {
             logger.debug(
                 `[RouteWeatherSampling] Using cached results (${sampleCache.samples.length} samples, same departure time)`
@@ -157,11 +160,15 @@ export async function fetchRouteWeatherSamples(
             // Compute ETA: departureTime + (distance / airspeed) in hours → ms
             const etaMs = departureTime + (point.distance / airspeedKnots) * 3600000;
 
+            // When adjustForFlightTime is off, use departure time for all points
+            // (matches main waypoint weather behavior)
+            const targetTime = adjustForFlightTime ? etaMs : departureTime;
+
             const weather = await fetchWaypointWeather(
                 point.lat,
                 point.lon,
                 pluginName,
-                etaMs,
+                targetTime,
                 `Route sample @ ${point.distance.toFixed(1)} NM`,
                 plannedAltitude,
                 enableLogging,
@@ -174,6 +181,7 @@ export async function fetchRouteWeatherSamples(
                 lat: point.lat,
                 lon: point.lon,
                 weather,
+                etaTime: adjustForFlightTime ? etaMs : undefined,
             } as RouteWeatherSample;
         },
         MAX_CONCURRENT,
@@ -188,7 +196,7 @@ export async function fetchRouteWeatherSamples(
     }
 
     // Store in cache
-    sampleCache = { routeKey, departureTime, samples };
+    sampleCache = { routeKey, departureTime, adjustForFlightTime, samples };
 
     return samples;
 }

@@ -6,6 +6,7 @@
 import type { FlightPlan } from './flightPlan';
 import type { VFRWindow } from './vfrWindow';
 import type { PluginSettings } from './settings';
+import type { VfrConditionThresholds } from './conditionThresholds';
 
 /**
  * Supported LLM providers
@@ -13,7 +14,7 @@ import type { PluginSettings } from './settings';
  * - openai: Direct OpenAI API (may have CORS issues from browser)
  * - openrouter: OpenRouter.ai proxy (browser-friendly, supports all models)
  */
-export type LLMProvider = 'anthropic' | 'openai' | 'openrouter';
+export type LLMProvider = 'anthropic' | 'openai' | 'openrouter' | 'custom';
 
 /**
  * Curated model list per provider.
@@ -41,6 +42,10 @@ export interface LLMConfig {
     provider: LLMProvider;
     apiKey: string;
     model: string;
+    customEndpoint?: string;
+    thresholds?: VfrConditionThresholds;
+    aircraftCategory?: string;
+    region?: string;
 }
 
 /**
@@ -118,6 +123,11 @@ export const LLM_PROVIDER_CONFIGS: Record<LLMProvider, LLMProviderConfig> = {
             'X-Title': 'VFR Flight Planner',
         },
     },
+    custom: {
+        endpoint: '',  // Set dynamically from LLMConfig.customEndpoint
+        authHeader: 'Authorization',
+        authPrefix: 'Bearer ',
+    },
 };
 
 /**
@@ -134,6 +144,7 @@ export const MODELS_BY_PROVIDER: Record<LLMProvider, { id: string; label: string
         { id: 'gpt-4o', label: 'GPT-4o (Deep)' },
     ],
     openrouter: [],
+    custom: [],  // User provides model name via free-text input
 };
 
 /**
@@ -144,4 +155,5 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<LLMProvider, string> = {
     anthropic: 'claude-haiku-4-5-20251001',
     openai: 'gpt-4o-mini',
     openrouter: 'openrouter/auto',
+    custom: 'default',
 };

@@ -104,6 +104,11 @@ export interface SessionFlightPlanData {
 }
 
 /**
+ * VFR segment condition assessment
+ */
+export type SegmentCondition = 'good' | 'marginal' | 'poor' | 'unknown';
+
+/**
  * Type guard to check if data is valid point forecast data
  */
 export function isPointForecastData(data: unknown): data is WindyPointForecastData {

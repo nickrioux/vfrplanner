@@ -52,11 +52,22 @@ export function getInterpolationIndices(timestamps: number[], target?: number): 
         if (targetTime >= timestamps[i] && targetTime <= timestamps[i + 1]) {
             const timeDiff = timestamps[i + 1] - timestamps[i];
             const fraction = timeDiff > 0 ? (targetTime - timestamps[i]) / timeDiff : 0;
+
+            // If target exactly matches the upper timestamp, use it directly
+            if (targetTime === timestamps[i + 1]) {
+                return {
+                    lowerIndex: i + 1,
+                    upperIndex: i + 1,
+                    fraction: 0,
+                    needsInterpolation: false,
+                };
+            }
+
             return {
                 lowerIndex: i,
                 upperIndex: i + 1,
                 fraction,
-                needsInterpolation: fraction > 0 && fraction < 1,
+                needsInterpolation: fraction > 0,
             };
         }
     }

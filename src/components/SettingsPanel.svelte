@@ -141,21 +141,38 @@ function handleWeatherSampleEnabledChange(e: Event) {
         handleChange();
     }
 
+    function handleLlmCustomEndpointChange(e: Event) {
+        const value = (e.target as HTMLInputElement).value;
+        settingsStore.setLlmCustomEndpoint(value);
+        llmTestStatus = 'idle';
+        handleChange();
+    }
+
     async function handleTestConnection() {
-        if (!settings.llmApiKey) {
+        if (!settings.llmApiKey && settings.llmProvider !== 'custom') {
             llmTestStatus = 'error';
             llmTestError = 'No API key configured';
+            return;
+        }
+        if (settings.llmProvider === 'custom' && !settings.llmCustomEndpoint) {
+            llmTestStatus = 'error';
+            llmTestError = 'No endpoint URL configured';
             return;
         }
         llmTestStatus = 'testing';
         llmTestError = '';
 
         const providerConfig = LLM_PROVIDER_CONFIGS[settings.llmProvider];
+        const endpoint = settings.llmProvider === 'custom' && settings.llmCustomEndpoint
+            ? settings.llmCustomEndpoint
+            : providerConfig.endpoint;
         const headers: Record<string, string> = {
             'Content-Type': 'application/json',
-            [providerConfig.authHeader]: providerConfig.authPrefix + settings.llmApiKey,
             ...providerConfig.extraHeaders,
         };
+        if (settings.llmApiKey) {
+            headers[providerConfig.authHeader] = providerConfig.authPrefix + settings.llmApiKey;
+        }
 
         // Build a minimal request body depending on provider
         let body: string;
@@ -167,7 +184,7 @@ function handleWeatherSampleEnabledChange(e: Event) {
                 messages: [{ role: 'user', content: 'Hi' }],
             });
         } else {
-            // OpenAI-compatible (openai + openrouter)
+            // OpenAI-compatible (openai, openrouter, custom)
             body = JSON.stringify({
                 model: settings.llmModel,
                 max_tokens: 16,
@@ -176,7 +193,7 @@ function handleWeatherSampleEnabledChange(e: Event) {
         }
 
         try {
-            const res = await fetch(providerConfig.endpoint, {
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers,
                 body,
@@ -195,7 +212,7 @@ function handleWeatherSampleEnabledChange(e: Event) {
         }
     }
 
-    $: showModelSelector = settings.llmProvider !== 'openrouter';
+    $: showModelSelector = settings.llmProvider !== 'openrouter' && settings.llmProvider !== 'custom';
     $: availableModels = MODELS_BY_PROVIDER[settings.llmProvider] || [];
 
     $: totalDistance = flightPlan?.totals.distance || 0;
@@ -474,6 +491,7 @@ function handleWeatherSampleEnabledChange(e: Event) {
                             <option value="openrouter">OpenRouter (Recommended)</option>
                             <option value="anthropic">Anthropic (Claude)</option>
                             <option value="openai">OpenAI (GPT)</option>
+                            <option value="custom">Custom / Local LLM</option>
                         </select>
                     </div>
                     {#if settings.llmProvider === 'openrouter'}
@@ -485,6 +503,10 @@ function handleWeatherSampleEnabledChange(e: Event) {
                         <div class="setting-description">
                             Direct Anthropic API. May have CORS issues in some browsers.
                             Get a key at <a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a>
+                        </div>
+                    {:else if settings.llmProvider === 'custom'}
+                        <div class="setting-description">
+                            Connect to a local LLM (Ollama, LM Studio, llama.cpp, etc.) via an OpenAI-compatible endpoint.
                         </div>
                     {:else}
                         <div class="setting-description">
@@ -513,6 +535,39 @@ function handleWeatherSampleEnabledChange(e: Event) {
                     </div>
                 {/if}
 
+                {#if settings.llmProvider === 'custom'}
+                    <div class="setting-group">
+                        <label class="setting-label">Endpoint URL</label>
+                        <div class="setting-input">
+                            <input
+                                type="text"
+                                value={settings.llmCustomEndpoint}
+                                on:change={handleLlmCustomEndpointChange}
+                                placeholder="http://localhost:11434/v1/chat/completions"
+                            />
+                        </div>
+                        <div class="setting-description">
+                            OpenAI-compatible chat completions endpoint. Default works with Ollama.
+                        </div>
+                    </div>
+
+                    <div class="setting-group">
+                        <label class="setting-label">Model Name</label>
+                        <div class="setting-input">
+                            <input
+                                type="text"
+                                value={settings.llmModel}
+                                on:change={handleLlmModelChange}
+                                placeholder="e.g. llama3, mistral, gemma2"
+                            />
+                        </div>
+                        <div class="setting-description">
+                            The model identifier as expected by your local server (e.g. from <code>ollama list</code>).
+                        </div>
+                    </div>
+                {/if}
+
+                {#if settings.llmProvider !== 'custom'}
                 <div class="setting-group">
                     <label class="setting-label">API Key</label>
                     <div class="api-key-wrapper">
@@ -535,6 +590,7 @@ function handleWeatherSampleEnabledChange(e: Event) {
                         Your key is stored locally and only sent to the selected provider.
                     </div>
                 </div>
+                {/if}
 
                 <div class="setting-group">
                     <button class="customize-btn" on:click={handleTestConnection} disabled={llmTestStatus === 'testing'}>
@@ -544,8 +600,8 @@ function handleWeatherSampleEnabledChange(e: Event) {
                         {#if llmTestStatus === 'success'}
                             <span class="status-dot connected"></span> Connected
                         {:else if llmTestStatus === 'error'}
-                            <span class="status-dot error"></span> {llmTestError || 'Invalid key'}
-                        {:else if settings.llmApiKey}
+                            <span class="status-dot error"></span> {llmTestError || 'Connection failed'}
+                        {:else if settings.llmApiKey || settings.llmProvider === 'custom'}
                             <span class="status-dot idle"></span> Not tested
                         {:else}
                             <span class="status-dot idle"></span> Not configured

@@ -16,6 +16,7 @@ export interface RouteWeatherSample {
     lat: number;
     lon: number;
     weather: WaypointWeather;
+    etaTime?: number;   // ETA timestamp (ms) — set when adjustForFlightTime is enabled
 }
 
 /**

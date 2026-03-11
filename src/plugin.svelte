@@ -579,7 +579,7 @@
     import type { FlightPlan, Waypoint, WaypointType, PluginSettings, RunwayInfo } from './types';
     import { DEFAULT_SETTINGS } from './types';
     import type { AircraftPerformance } from './types/settings';
-    import { type VfrConditionThresholds, type ConditionPreset, getThresholdsForPreset } from './types/conditionThresholds';
+    import { type VfrConditionThresholds, type ConditionPreset, getThresholdsForPreset, getThresholdsForAircraft } from './types/conditionThresholds';
     import { getActiveThresholds } from './services/vfrConditionRules';
     import AltitudeProfile from './components/AltitudeProfile.svelte';
     import SettingsPanel from './components/SettingsPanel.svelte';
@@ -733,8 +733,16 @@
     $: settings = $settingsStore;
 
     // LLM service - create/update when AI settings change
-    $: if (settings.llmEnabled && settings.llmApiKey) {
-        const config = { provider: settings.llmProvider, apiKey: settings.llmApiKey, model: settings.llmModel };
+    $: if (settings.llmEnabled && (settings.llmApiKey || settings.llmProvider === 'custom')) {
+        const config = {
+            provider: settings.llmProvider,
+            apiKey: settings.llmApiKey,
+            model: settings.llmModel,
+            customEndpoint: settings.llmCustomEndpoint,
+            thresholds: getThresholdsForAircraft(settings.aircraftCategory, settings.region, settings.conditionPreset, settings.customThresholds),
+            aircraftCategory: settings.aircraftCategory,
+            region: settings.region,
+        };
         if (llmService) {
             llmService.updateConfig(config);
         } else {
@@ -1439,6 +1447,9 @@
      */
     async function useVFRWindow(window: VFRWindow) {
         await controllerUseVFRWindow(window);
+        // Force Svelte to flush DOM updates and trigger a repaint
+        weatherData = weatherData;
+        weatherAlerts = weatherAlerts;
     }
 
     // Session persistence functions
@@ -1617,6 +1628,19 @@
 </script>
 
 <style lang="less">
+    /* Theme color variables - centralized color definitions */
+    :global(.plugin__content) {
+        --color-primary: #3498db;
+        --color-error: #e74c3c;
+        --color-warning: #f39c12;
+        --color-success: #2ecc71;
+        --color-purple: #9b59b6;
+        --color-condition-good: #4caf50;
+        --color-condition-marginal: #ff9800;
+        --color-condition-poor: #f44336;
+        --color-condition-unknown: #757575;
+    }
+
     /* Title row with help button */
     .plugin__title-row {
         display: flex;
@@ -1697,8 +1721,8 @@
         }
 
         &.active {
-            background: #3498db;
-            border-color: #3498db;
+            background: var(--color-primary);
+            border-color: var(--color-primary);
             color: white;
         }
     }
@@ -1739,7 +1763,7 @@
         }
 
         &.active {
-            background: #3498db;
+            background: var(--color-primary);
             color: white;
         }
 
@@ -1773,7 +1797,7 @@
         cursor: pointer;
 
         &.drag-over {
-            border-color: #3498db;
+            border-color: var(--color-primary);
             background: rgba(52, 152, 219, 0.1);
         }
 
@@ -1808,7 +1832,7 @@
     .btn-browse {
         padding: 6px 16px;
         min-height: 44px;
-        background: #3498db;
+        background: var(--color-primary);
         border: none;
         border-radius: 4px;
         color: white;
@@ -1866,7 +1890,7 @@
 
     .plan-name {
         font-weight: 500;
-        color: #3498db;
+        color: var(--color-primary);
         cursor: pointer;
         padding: 2px 6px;
         min-height: 44px;
@@ -1891,9 +1915,9 @@
     .plan-name-input {
         flex: 1;
         background: rgba(0, 0, 0, 0.3);
-        border: 1px solid #3498db;
+        border: 1px solid var(--color-primary);
         border-radius: 4px;
-        color: #3498db;
+        color: var(--color-primary);
         font-size: 14px;
         font-weight: 500;
         padding: 4px 8px;
@@ -1914,7 +1938,7 @@
 
         &:hover {
             background: rgba(231, 76, 60, 0.3);
-            color: #e74c3c;
+            color: var(--color-error);
         }
 
         &:active {
@@ -1928,7 +1952,7 @@
     }
 
     .loading {
-        color: #3498db;
+        color: var(--color-primary);
     }
 
     .error-message {
@@ -1936,7 +1960,7 @@
         padding: 8px;
         background: rgba(231, 76, 60, 0.2);
         border-radius: 4px;
-        color: #e74c3c;
+        color: var(--color-error);
         font-size: 12px;
     }
 
@@ -2023,7 +2047,7 @@
 
         &.btn-weather.has-alerts {
             background: rgba(243, 156, 18, 0.3);
-            border: 1px solid #f39c12;
+            border: 1px solid var(--color-warning);
         }
 
         &.btn-edit-active {
@@ -2123,7 +2147,7 @@
 
         &.active {
             background: rgba(52, 152, 219, 0.4);
-            border-color: #3498db;
+            border-color: var(--color-primary);
         }
     }
 
@@ -2154,14 +2178,14 @@
 
         &:focus {
             outline: none;
-            border-color: #3498db;
+            border-color: var(--color-primary);
         }
     }
 
     .btn-search {
         padding: 8px 12px;
         background: rgba(52, 152, 219, 0.3);
-        border: 1px solid #3498db;
+        border: 1px solid var(--color-primary);
         border-radius: 4px;
         color: white;
         cursor: pointer;
@@ -2182,7 +2206,7 @@
         padding: 6px 8px;
         background: rgba(231, 76, 60, 0.2);
         border-radius: 4px;
-        color: #e74c3c;
+        color: var(--color-error);
         font-size: 11px;
     }
 
@@ -2238,7 +2262,7 @@
 
     .result-id {
         font-weight: 600;
-        color: #3498db;
+        color: var(--color-primary);
         font-size: 12px;
         min-width: 45px;
     }
@@ -2292,7 +2316,7 @@
         padding: 8px;
         background: rgba(231, 76, 60, 0.2);
         border-radius: 4px;
-        color: #e74c3c;
+        color: var(--color-error);
         font-size: 12px;
     }
 
@@ -2301,7 +2325,7 @@
         padding: 8px;
         background: rgba(243, 156, 18, 0.2);
         border-radius: 4px;
-        color: #f39c12;
+        color: var(--color-warning);
         font-size: 12px;
     }
 
@@ -2310,7 +2334,7 @@
         padding: 8px;
         background: rgba(231, 76, 60, 0.15);
         border-radius: 4px;
-        color: #e74c3c;
+        color: var(--color-error);
         font-size: 12px;
     }
 
@@ -2345,7 +2369,7 @@
 
             &:focus {
                 outline: none;
-                border-color: #3498db;
+                border-color: var(--color-primary);
             }
         }
 

@@ -292,10 +292,8 @@ export function evaluateSegmentCondition(
     };
 }
 
-/**
- * Segment condition types for VFR flight conditions
- */
-export type SegmentCondition = 'good' | 'marginal' | 'poor' | 'unknown';
+// Re-export from types for backward compatibility
+export type { SegmentCondition } from '../types/weather';
 
 /**
  * Profile data point interface

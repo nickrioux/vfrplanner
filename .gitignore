@@ -11,4 +11,7 @@ dist/*
 src/data/airports-fallback.json
 scripts/.cache/
 coverage/
+test-results/
+playwright-report/
+e2e/.auth/
 .gemini/.env

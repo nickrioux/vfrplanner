@@ -6,10 +6,12 @@
             <button class="btn-close" on:click={close} title="Close">✕</button>
         </div>
 
-        <div class="help-tabs">
+        <div class="help-tabs" role="tablist" aria-label="Help sections">
             {#each tabs as tab}
                 <button
                     class="tab-btn"
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
                     class:active={activeTab === tab.id}
                     on:click={() => activeTab = tab.id}
                 >

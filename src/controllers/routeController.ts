@@ -234,23 +234,40 @@ export async function createNewFlightPlan(): Promise<void> {
 }
 
 /**
- * Add an airport to the flight plan
+ * Update the previous arrival waypoint to cruising altitude when it becomes a middle waypoint.
+ * Called after adding a new waypoint that turns the old last waypoint into an enroute point.
  */
-export async function addAirportToFlightPlan(airport: AirportDBResult): Promise<{ success: boolean; error?: string }> {
+function updatePreviousArrivalAltitude(previousArrivalId: string | null, settings: PluginSettings): void {
+    if (!settings.autoTerrainElevation || !previousArrivalId) return;
+
+    const updatedPlan = routeStore.getState().flightPlan;
+    if (!updatedPlan) return;
+
+    const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
+    if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
+        routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
+        if (settings.enableLogging) {
+            logger.debug(`[RouteController] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
+        }
+    }
+}
+
+/**
+ * Shared logic for adding a waypoint (airport, navaid, etc.) to the flight plan.
+ * Ensures a plan exists, checks for duplicates, handles terrain elevation, and updates the map.
+ */
+async function addWaypointToFlightPlan(waypoint: Waypoint): Promise<{ success: boolean; error?: string }> {
     if (!deps) return { success: false, error: 'Route controller not initialized' };
 
     const settings = getSettings();
     const currentPlan = routeStore.getState().flightPlan;
 
     if (!currentPlan) {
-        // Create new flight plan if none exists
         await createNewFlightPlan();
     }
 
     const planAfterCreate = routeStore.getState().flightPlan;
     if (!planAfterCreate) return { success: false, error: 'Failed to create flight plan' };
-
-    const waypoint = airportToWaypoint(airport);
 
     // Check if already in flight plan
     if (planAfterCreate.waypoints.some(wp => wp.name === waypoint.name)) {
@@ -280,18 +297,7 @@ export async function addAirportToFlightPlan(airport: AirportDBResult): Promise<
     routeStore.addWaypoint(waypoint);
 
     // Update previous arrival to cruising altitude if needed
-    if (settings.autoTerrainElevation && previousArrivalId) {
-        const updatedPlan = routeStore.getState().flightPlan;
-        if (updatedPlan) {
-            const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
-            if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
-                if (settings.enableLogging) {
-                    logger.debug(`[RouteController] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
-                }
-            }
-        }
-    }
+    updatePreviousArrivalAltitude(previousArrivalId, settings);
 
     // Wait for reactive updates to propagate before updating map
     await tick();
@@ -302,70 +308,17 @@ export async function addAirportToFlightPlan(airport: AirportDBResult): Promise<
 }
 
 /**
+ * Add an airport to the flight plan
+ */
+export async function addAirportToFlightPlan(airport: AirportDBResult): Promise<{ success: boolean; error?: string }> {
+    return addWaypointToFlightPlan(airportToWaypoint(airport));
+}
+
+/**
  * Add a navaid to the flight plan
  */
 export async function addNavaidToFlightPlan(navaid: AirportDBNavaid): Promise<{ success: boolean; error?: string }> {
-    if (!deps) return { success: false, error: 'Route controller not initialized' };
-
-    const settings = getSettings();
-    const currentPlan = routeStore.getState().flightPlan;
-
-    if (!currentPlan) {
-        await createNewFlightPlan();
-    }
-
-    const planAfterCreate = routeStore.getState().flightPlan;
-    if (!planAfterCreate) return { success: false, error: 'Failed to create flight plan' };
-
-    const waypoint = navaidToWaypoint(navaid);
-
-    // Check if already in flight plan
-    if (planAfterCreate.waypoints.some(wp => wp.name === waypoint.name)) {
-        return { success: false, error: `${waypoint.name} is already in the flight plan` };
-    }
-
-    const isFirstWaypoint = planAfterCreate.waypoints.length === 0;
-    const previousArrivalId = planAfterCreate.waypoints.length > 1
-        ? planAfterCreate.waypoints[planAfterCreate.waypoints.length - 1].id
-        : null;
-
-    // Handle terrain elevation for new waypoint
-    if (settings.autoTerrainElevation) {
-        if (!waypoint.altitude || waypoint.altitude === 0) {
-            const terrainElevation = await fetchPointElevation(waypoint.lat, waypoint.lon, settings.enableLogging);
-            if (terrainElevation !== undefined) {
-                waypoint.altitude = terrainElevation;
-                waypoint.elevation = terrainElevation;
-            }
-        }
-        if (settings.enableLogging) {
-            logger.debug(`[RouteController] ${isFirstWaypoint ? 'Departure' : 'Arrival'} ${waypoint.name}: ${waypoint.altitude} ft`);
-        }
-    }
-
-    // Add new waypoint using store
-    routeStore.addWaypoint(waypoint);
-
-    // Update previous arrival to cruising altitude if needed
-    if (settings.autoTerrainElevation && previousArrivalId) {
-        const updatedPlan = routeStore.getState().flightPlan;
-        if (updatedPlan) {
-            const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
-            if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
-                if (settings.enableLogging) {
-                    logger.debug(`[RouteController] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
-                }
-            }
-        }
-    }
-
-    // Wait for reactive updates to propagate before updating map
-    await tick();
-    deps.onMapUpdate();
-    deps.onSaveSession();
-
-    return { success: true };
+    return addWaypointToFlightPlan(navaidToWaypoint(navaid));
 }
 
 /**
@@ -406,18 +359,7 @@ export async function addWaypointFromMapClick(lat: number, lon: number): Promise
     routeStore.addWaypoint(newWaypoint);
 
     // Update previous arrival to cruising altitude if needed
-    if (settings.autoTerrainElevation && previousArrivalId) {
-        const updatedPlan = routeStore.getState().flightPlan;
-        if (updatedPlan) {
-            const previousArrival = updatedPlan.waypoints.find(wp => wp.id === previousArrivalId);
-            if (previousArrival && previousArrival.altitude !== undefined && previousArrival.altitude < settings.defaultAltitude) {
-                routeStore.updateWaypoint(previousArrivalId, { altitude: settings.defaultAltitude });
-                if (settings.enableLogging) {
-                    logger.debug(`[RouteController] Previous arrival ${previousArrival.name} now middle waypoint: ${settings.defaultAltitude} ft`);
-                }
-            }
-        }
-    }
+    updatePreviousArrivalAltitude(previousArrivalId, settings);
 
     // Wait for reactive updates to propagate before updating map
     await tick();

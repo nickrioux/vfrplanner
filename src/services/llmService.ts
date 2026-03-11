@@ -9,10 +9,11 @@ import type { FlightPlan } from '../types/flightPlan';
 import type { VFRWindow } from '../types/vfrWindow';
 import type { WaypointWeather, WeatherAlert } from './weatherService';
 
-const SYSTEM_PROMPT = `You are an aviation weather briefing assistant integrated into a VFR flight planning tool.
+const BASE_SYSTEM_PROMPT = `You are an aviation weather briefing assistant integrated into a VFR flight planning tool.
 You help pilots interpret weather data and make informed go/no-go decisions.
 Be concise, use pilot-standard terminology (METAR/TAF conventions, VFR/IFR/MVFR/LIFR),
 and always prioritize safety. When conditions are marginal, clearly state the risks.
+Wind gust data is only relevant at departure and arrival airports (for takeoff/landing); ignore gusts at en-route waypoints.
 Respond in the same language as the user's query (French or English).`;
 
 const MAX_RESPONSE_TOKENS = 512;
@@ -26,7 +27,7 @@ function extractResponseText(provider: string, data: unknown): string {
         const content = d.content as Array<{ type: string; text: string }>;
         return content?.[0]?.text || '';
     }
-    // OpenAI-compatible (openai + openrouter)
+    // OpenAI-compatible (openai, openrouter, custom)
     const choices = d.choices as Array<{ message: { content: string } }>;
     return choices?.[0]?.message?.content || '';
 }
@@ -43,15 +44,59 @@ export class LLMService {
     }
 
     /**
+     * Build the system prompt including VFR condition thresholds
+     */
+    private getSystemPrompt(): string {
+        const t = this.config.thresholds;
+        if (!t) return BASE_SYSTEM_PROMPT;
+
+        const category = this.config.aircraftCategory || 'airplane';
+        const region = this.config.region || 'unknown';
+
+        return [
+            BASE_SYSTEM_PROMPT,
+            '',
+            `The pilot is flying a ${category} in the ${region} region.`,
+            'Use the following VFR condition thresholds to assess weather:',
+            `- Cloud base (AGL): POOR below ${t.cloudBaseAgl.poor}ft, MARGINAL below ${t.cloudBaseAgl.marginal}ft`,
+            `- Visibility: POOR below ${t.visibility.poor}km, MARGINAL below ${t.visibility.marginal}km`,
+            `- Precipitation: POOR above ${t.precipitation.poor}mm, MARGINAL above ${t.precipitation.marginal}mm`,
+            `- Surface wind: POOR above ${t.surfaceWindSpeed.poor}kt, MARGINAL above ${t.surfaceWindSpeed.marginal}kt`,
+            `- Gusts (departure/arrival only): POOR above ${t.surfaceGusts.poor}kt, MARGINAL above ${t.surfaceGusts.marginal}kt`,
+            `- Crosswind: POOR above ${t.crosswind.poor}kt, MARGINAL above ${t.crosswind.marginal}kt`,
+            `- Tailwind: POOR above ${t.tailwind.poor}kt, MARGINAL above ${t.tailwind.marginal}kt`,
+            `- Terrain clearance: POOR below ${t.terrainClearance.poor}ft, MARGINAL below ${t.terrainClearance.marginal}ft`,
+            `- Cloud clearance: POOR below ${t.cloudClearance.poor}ft, MARGINAL below ${t.cloudClearance.marginal}ft`,
+        ].join('\n');
+    }
+
+    /**
+     * Resolve the endpoint and headers for the current provider config
+     */
+    private getProviderConfig(): { endpoint: string; headers: Record<string, string> } {
+        const providerConfig = LLM_PROVIDER_CONFIGS[this.config.provider];
+        const endpoint = this.config.provider === 'custom' && this.config.customEndpoint
+            ? this.config.customEndpoint
+            : providerConfig.endpoint;
+
+        const headers: Record<string, string> = {
+            'Content-Type': 'application/json',
+            ...providerConfig.extraHeaders,
+        };
+
+        // Only add auth header if an API key is provided (local LLMs often don't need one)
+        if (this.config.apiKey) {
+            headers[providerConfig.authHeader] = providerConfig.authPrefix + this.config.apiKey;
+        }
+
+        return { endpoint, headers };
+    }
+
+    /**
      * Send a completion request to the configured LLM provider
      */
     private async complete(systemPrompt: string, userMessage: string): Promise<string> {
-        const providerConfig = LLM_PROVIDER_CONFIGS[this.config.provider];
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            [providerConfig.authHeader]: providerConfig.authPrefix + this.config.apiKey,
-            ...providerConfig.extraHeaders,
-        };
+        const { endpoint, headers } = this.getProviderConfig();
 
         let body: string;
         if (this.config.provider === 'anthropic') {
@@ -73,7 +118,7 @@ export class LLMService {
             });
         }
 
-        const res = await fetch(providerConfig.endpoint, { method: 'POST', headers, body });
+        const res = await fetch(endpoint, { method: 'POST', headers, body });
         if (!res.ok) {
             const err = await res.json().catch(() => null);
             const msg = (err as Record<string, { message?: string }>)?.error?.message || `HTTP ${res.status}`;
@@ -88,12 +133,7 @@ export class LLMService {
      * Multi-turn chat with full message history
      */
     private async chatComplete(systemPrompt: string, messages: ChatMessage[]): Promise<string> {
-        const providerConfig = LLM_PROVIDER_CONFIGS[this.config.provider];
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            [providerConfig.authHeader]: providerConfig.authPrefix + this.config.apiKey,
-            ...providerConfig.extraHeaders,
-        };
+        const { endpoint, headers } = this.getProviderConfig();
 
         let body: string;
         if (this.config.provider === 'anthropic') {
@@ -115,7 +155,7 @@ export class LLMService {
             });
         }
 
-        const res = await fetch(providerConfig.endpoint, { method: 'POST', headers, body });
+        const res = await fetch(endpoint, { method: 'POST', headers, body });
         if (!res.ok) {
             const err = await res.json().catch(() => null);
             const msg = (err as Record<string, { message?: string }>)?.error?.message || `HTTP ${res.status}`;
@@ -157,7 +197,7 @@ export class LLMService {
             'Provide a 3–5 sentence pilot briefing ranking these windows. Recommend the best option and flag any constraints.',
         ].join('\n');
 
-        return this.complete(SYSTEM_PROMPT, userMessage);
+        return this.complete(this.getSystemPrompt(), userMessage);
     }
 
     /**
@@ -168,15 +208,18 @@ export class LLMService {
         alerts: Map<string, WeatherAlert[]>,
         plan: FlightPlan,
     ): Promise<string> {
-        const waypointLines = plan.waypoints.map(wp => {
+        const lastIdx = plan.waypoints.length - 1;
+        const waypointLines = plan.waypoints.map((wp, i) => {
             const wx = weatherData.get(wp.id);
             const wpAlerts = alerts.get(wp.id) || [];
             if (!wx) return `${wp.name}: No weather data`;
 
+            // Only include gust data for departure and arrival waypoints
+            const isDepartureOrArrival = i === 0 || i === lastIdx;
             const parts = [
                 `${wp.name} (${wp.type})`,
                 `  Wind: ${Math.round(wx.windDir)}°/${Math.round(wx.windSpeed)}kt`,
-                wx.windGust ? `  Gust: ${Math.round(wx.windGust)}kt` : null,
+                isDepartureOrArrival && wx.windGust ? `  Gust: ${Math.round(wx.windGust)}kt` : null,
                 wx.cloudBase != null ? `  Ceiling: ${Math.round(wx.cloudBase * 3.281)}ft AGL` : null,
                 wx.visibility != null ? `  Vis: ${wx.visibility.toFixed(1)}km` : null,
                 `  Temp: ${Math.round(wx.temperature)}°C`,
@@ -198,7 +241,7 @@ export class LLMService {
             'Provide a 4–6 sentence route weather summary. Characterize the overall route, identify the worst waypoint and why, mention notable alerts, and give a plain-language go/no-go sentiment (the pilot decides).',
         ].join('\n');
 
-        return this.complete(SYSTEM_PROMPT, userMessage);
+        return this.complete(this.getSystemPrompt(), userMessage);
     }
 
     /**
@@ -231,7 +274,7 @@ export class LLMService {
             'Provide a focused 2–3 sentence debrief: what to expect at departure, any waypoint to monitor en route, and arrival conditions.',
         ].join('\n');
 
-        return this.complete(SYSTEM_PROMPT, userMessage);
+        return this.complete(this.getSystemPrompt(), userMessage);
     }
 
     /**
@@ -268,7 +311,7 @@ export class LLMService {
             : 'No VFR windows found';
 
         const contextPrompt = [
-            SYSTEM_PROMPT,
+            this.getSystemPrompt(),
             '',
             `Current flight: ${origin} → ${dest}, ${Math.round(plan.totals.distance)}NM, ETE ${Math.round(plan.totals.ete)} min, ${plan.waypoints.length} waypoints.`,
             `Weather: ${wxSummary}`,
@@ -306,7 +349,7 @@ export class LLMService {
             JSON.stringify(entries),
         ].join('\n');
 
-        const response = await this.complete(SYSTEM_PROMPT, userMessage);
+        const response = await this.complete(this.getSystemPrompt(), userMessage);
 
         // Parse JSON from response (handle markdown code fences)
         const jsonMatch = response.match(/\{[\s\S]*\}/);

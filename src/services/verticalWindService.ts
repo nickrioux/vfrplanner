@@ -4,6 +4,8 @@
  */
 
 import { getMeteogramForecastData } from '@windy/fetch';
+import type { MeteogramDataPayload } from '@windy/interfaces';
+import type { HttpPayload } from '@windy/http';
 import type { WindyMeteogramData } from '../types/weather';
 import { METEOGRAM_PRESSURE_LEVELS } from './altitudeToWindService';
 import { logger } from './logger';
@@ -50,10 +52,10 @@ export async function fetchVerticalWindData(
 
         // Use getMeteogramForecastData with extended: 'true' to get all pressure levels
         // This is the approach used by flyxc windy-sounding plugin
-        const result = await getMeteogramForecastData(
-            'ecmwf' as any,  // model
-            { lat, lon, step: 1 },  // location with step
-            { extended: 'true' }  // extended option to get all pressure levels
+        const result: HttpPayload<MeteogramDataPayload> = await getMeteogramForecastData(
+            'ecmwf',
+            { lat, lon, step: 1 },
+            { extended: 'true' }
         );
 
         if (enableLogging) {
@@ -94,11 +96,9 @@ export async function fetchVerticalWindData(
         //   data.hours (most common for meteogram), data.ts, data['ts-surface'],
         //   result.data.ts, result.data.hours
         let rawTimestamps: number[] | undefined =
-            data.hours as number[] ||
-            data.ts as number[] ||
-            data['ts-surface'] as number[] ||
-            (result?.data as any)?.hours ||
-            (result?.data as any)?.ts;
+            (data as Record<string, unknown>).hours as number[] ||
+            (data as Record<string, unknown>).ts as number[] ||
+            (data as Record<string, unknown>)['ts-surface'] as number[];
 
         // Windy meteogram 'hours' may be in seconds — convert to milliseconds if needed
         let timestamps: number[] | undefined;

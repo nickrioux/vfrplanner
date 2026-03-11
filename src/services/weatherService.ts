@@ -7,6 +7,8 @@
  * - altitudeToWindService: Pressure level conversions
  * - verticalWindService: Vertical wind profile handling
  * - pointForecastService: Model detection and point forecast fetching
+ * - weatherAlerts: Alert checking and threshold management
+ * - weatherInterpolation: Extracting weather at specific timestamps from cached forecasts
  */
 
 import { getPointForecastData } from '@windy/fetch';
@@ -25,6 +27,16 @@ import {
     CLEAR_SKY_METERS,
 } from './weatherHelpers';
 import { logger } from './logger';
+
+// Import from extracted modules
+import {
+    checkWeatherAlerts,
+    DEFAULT_ALERT_THRESHOLDS,
+    type WeatherAlert,
+    type WeatherAlertThresholds,
+} from './weatherAlerts';
+
+import { extractWeatherAtTimestamp } from './weatherInterpolation';
 
 // Import from specialized modules
 import {
@@ -75,6 +87,13 @@ export {
     getForecastTimeRange,
     getCurrentProduct,
     type ForecastTimeRange,
+    // From weatherAlerts
+    checkWeatherAlerts,
+    DEFAULT_ALERT_THRESHOLDS,
+    type WeatherAlert,
+    type WeatherAlertThresholds,
+    // From weatherInterpolation
+    extractWeatherAtTimestamp,
 };
 
 export interface WaypointWeather {
@@ -121,29 +140,6 @@ export interface FullForecastData {
     fetchedAt: number;
 }
 
-export interface WeatherAlert {
-    type: 'wind' | 'gust' | 'visibility' | 'ceiling' | 'rain' | 'temperature' | 'altitude-conflict';
-    severity: 'caution' | 'warning';
-    message: string;
-    value: number;
-    threshold: number;
-}
-
-export interface WeatherAlertThresholds {
-    windSpeed: number;      // knots
-    gustSpeed: number;      // knots
-    visibility: number;     // km
-    cloudBase: number;      // feet
-    precipitation: number;  // mm
-}
-
-export const DEFAULT_ALERT_THRESHOLDS: WeatherAlertThresholds = {
-    windSpeed: 25,
-    gustSpeed: 35,
-    visibility: 5,
-    cloudBase: 1500,
-    precipitation: 5,
-};
 
 /**
  * Fetch weather data for a single waypoint at a specific time
@@ -402,58 +398,56 @@ export async function fetchWaypointWeather(
         const rhData = responseData['rh-surface'] || responseData.rh;
         const mmData = responseData['mm-surface'] || responseData.mm;
 
-        // Try to get cbase from meteogram data first, then fall back to point forecast
+        // Always use ECMWF cbase data regardless of selected model.
+        // Priority: 1) point forecast cbase if already ECMWF,
+        //           2) meteogram cbase (hardcoded to ECMWF),
+        //           3) separate ECMWF point forecast fetch.
         let cbaseData: number[] | undefined;
         let cbaseSource = 'none';
+        let ecmwfCbaseTimestamps: number[] | undefined;
 
-        if (meteogramData) {
-            // Check for cbase in meteogram data (try various possible key names)
-            const meteogramCbase = meteogramData['cbase-surface'] || meteogramData['cbase'] ||
-                                   meteogramData['cloudBase-surface'] || meteogramData['cloudBase'];
-            if (meteogramCbase && Array.isArray(meteogramCbase) && meteogramCbase.length > 0) {
-                cbaseData = meteogramCbase;
-                cbaseSource = 'meteogram';
+        // If the current model is ECMWF, responseData.cbase is already ECMWF
+        if (isEcmwfModel()) {
+            const ecmwfCbase = responseData.cbase;
+            if (ecmwfCbase && Array.isArray(ecmwfCbase) && ecmwfCbase.length > 0) {
+                cbaseData = ecmwfCbase;
+                cbaseSource = 'pointForecast-ecmwf';
                 if (enableLogging) {
-                    logger.debug(`[Weather] Using cbase from MeteogramForecastData for ${waypointName}:`, {
-                        dataLength: cbaseData.length,
-                        sample: cbaseData.slice(0, 5),
-                        allKeys: Object.keys(meteogramData).filter(k => k.includes('cbase') || k.includes('cloud'))
+                    logger.debug(`[Weather] Using cbase from ECMWF point forecast for ${waypointName}:`, {
+                        dataLength: cbaseData?.length,
+                        sample: cbaseData?.slice(0, 5)
                     });
                 }
             }
         }
 
-        // Fall back to ECMWF point forecast if meteogram doesn't have cbase
-        // This ensures ceiling data always comes from ECMWF regardless of selected model
-        let ecmwfCbaseTimestamps: number[] | undefined;
-
-        if (!cbaseData) {
-            // Check if current model is already ECMWF - if so, use existing response
-            const currentProduct = store.get('product') as Products;
-            if (currentProduct === 'ecmwf' || currentProduct === 'ecmwfWaves' || currentProduct === 'ecmwfAifs') {
-                cbaseData = responseData['cbase-surface'] || responseData.cbase;
-                if (cbaseData) {
-                    cbaseSource = 'pointForecast-ecmwf';
-                    if (enableLogging) {
-                        logger.debug(`[Weather] Using cbase from ECMWF PointForecastData for ${waypointName}:`, {
-                            dataLength: cbaseData?.length,
-                            sample: cbaseData?.slice(0, 5)
-                        });
-                    }
+        // Meteogram is hardcoded to ECMWF — use its cbase if available
+        if (!cbaseData && meteogramData) {
+            const meteogramCbase = meteogramData['cbase'];
+            if (meteogramCbase && Array.isArray(meteogramCbase) && meteogramCbase.length > 0) {
+                cbaseData = meteogramCbase;
+                cbaseSource = 'meteogram';
+                if (enableLogging) {
+                    logger.debug(`[Weather] Using cbase from ECMWF meteogram for ${waypointName}:`, {
+                        dataLength: cbaseData.length,
+                        sample: cbaseData.slice(0, 5),
+                    });
                 }
-            } else {
-                // Fetch ECMWF cbase separately since a different model is selected
-                const ecmwfCbase = await fetchEcmwfCbase(lat, lon, enableLogging);
-                if (ecmwfCbase) {
-                    cbaseData = ecmwfCbase.cbaseData;
-                    ecmwfCbaseTimestamps = ecmwfCbase.timestamps;
-                    cbaseSource = 'ecmwf-separate';
-                    if (enableLogging) {
-                        logger.debug(`[Weather] Using cbase from separate ECMWF fetch for ${waypointName}:`, {
-                            dataLength: cbaseData.length,
-                            sample: cbaseData.slice(0, 5)
-                        });
-                    }
+            }
+        }
+
+        // Last resort: fetch ECMWF point forecast separately
+        if (!cbaseData) {
+            const ecmwfCbase = await fetchEcmwfCbase(lat, lon, enableLogging);
+            if (ecmwfCbase) {
+                cbaseData = ecmwfCbase.cbaseData;
+                ecmwfCbaseTimestamps = ecmwfCbase.timestamps;
+                cbaseSource = 'ecmwf-fallback';
+                if (enableLogging) {
+                    logger.debug(`[Weather] Using cbase from ECMWF fallback for ${waypointName}:`, {
+                        dataLength: cbaseData.length,
+                        sample: cbaseData.slice(0, 5)
+                    });
                 }
             }
         }
@@ -470,7 +464,7 @@ export async function fetchWaypointWeather(
             // Meteogram has its own timestamps
             cbaseTimestamps = meteogramTimestamps || meteogramData.ts || meteogramData['ts-surface'];
             timestamps = responseData.ts || responseData['ts-surface'] || cbaseTimestamps || [];
-        } else if (cbaseSource === 'ecmwf-separate' && ecmwfCbaseTimestamps) {
+        } else if (cbaseSource === 'ecmwf-fallback' && ecmwfCbaseTimestamps) {
             // Use ECMWF timestamps for cbase interpolation
             cbaseTimestamps = ecmwfCbaseTimestamps;
             timestamps = responseData.ts || responseData['ts-surface'] || [];
@@ -764,103 +758,6 @@ export async function fetchFlightPlanWeather(
     return weatherMap;
 }
 
-/**
- * Check for weather alerts at a waypoint
- * @param weather - Weather data for the waypoint
- * @param thresholds - Alert thresholds
- * @param plannedAltitude - Planned flight altitude in feet (optional, for altitude conflict check)
- * @param isTerminal - True if this is a departure or arrival waypoint (wind/gust alerts only apply to terminals)
- */
-export function checkWeatherAlerts(
-    weather: WaypointWeather,
-    thresholds: WeatherAlertThresholds = DEFAULT_ALERT_THRESHOLDS,
-    plannedAltitude?: number,
-    isTerminal: boolean = false
-): WeatherAlert[] {
-    const alerts: WeatherAlert[] = [];
-
-    // Wind speed alert - only for terminal waypoints (departure/arrival)
-    // Use surface wind for terminals, not altitude wind
-    if (isTerminal) {
-        const terminalWindSpeed = weather.surfaceWindSpeed ?? weather.windSpeed;
-        if (terminalWindSpeed >= thresholds.windSpeed) {
-            alerts.push({
-                type: 'wind',
-                severity: terminalWindSpeed >= thresholds.windSpeed * 1.5 ? 'warning' : 'caution',
-                message: `Wind ${Math.round(terminalWindSpeed)} kt`,
-                value: terminalWindSpeed,
-                threshold: thresholds.windSpeed,
-            });
-        }
-    }
-
-    // Gust alert - only for terminal waypoints (departure/arrival)
-    if (isTerminal && weather.windGust && weather.windGust >= thresholds.gustSpeed) {
-        alerts.push({
-            type: 'gust',
-            severity: weather.windGust >= thresholds.gustSpeed * 1.3 ? 'warning' : 'caution',
-            message: `Gust ${Math.round(weather.windGust)} kt`,
-            value: weather.windGust,
-            threshold: thresholds.gustSpeed,
-        });
-    }
-
-    // Visibility alert
-    if (weather.visibility && weather.visibility < thresholds.visibility) {
-        alerts.push({
-            type: 'visibility',
-            severity: weather.visibility < thresholds.visibility / 2 ? 'warning' : 'caution',
-            message: `Vis ${weather.visibility.toFixed(1)} km`,
-            value: weather.visibility,
-            threshold: thresholds.visibility,
-        });
-    }
-
-    // Cloud base alert
-    // Note: weather.cloudBase is in meters AGL, but thresholds.cloudBase is in feet
-    if (weather.cloudBase) {
-        const cloudBaseFeet = metersToFeet(weather.cloudBase);
-        // Use rounded value (no decimals)
-        const ceilingDisplay = `${Math.round(cloudBaseFeet)} ft`;
-        
-        if (cloudBaseFeet < thresholds.cloudBase) {
-            alerts.push({
-                type: 'ceiling',
-                severity: cloudBaseFeet < thresholds.cloudBase / 2 ? 'warning' : 'caution',
-                message: `Ceiling ${ceilingDisplay}`,
-                value: cloudBaseFeet,
-                threshold: thresholds.cloudBase,
-            });
-        }
-
-        // Altitude conflict alert: cloud ceiling below planned altitude
-        if (plannedAltitude !== undefined && plannedAltitude > 0 && cloudBaseFeet < plannedAltitude) {
-            const margin = plannedAltitude - cloudBaseFeet;
-            // Use rounded value for planned altitude
-            const plannedAltDisplay = `${Math.round(plannedAltitude)} ft`;
-            alerts.push({
-                type: 'altitude-conflict',
-                severity: margin > 500 ? 'warning' : 'caution', // Warning if more than 500ft below
-                message: `Ceiling ${ceilingDisplay} below planned ${plannedAltDisplay}`,
-                value: cloudBaseFeet,
-                threshold: plannedAltitude,
-            });
-        }
-    }
-
-    // Precipitation alert
-    if (weather.precipitation && weather.precipitation >= thresholds.precipitation) {
-        alerts.push({
-            type: 'rain',
-            severity: weather.precipitation >= thresholds.precipitation * 2 ? 'warning' : 'caution',
-            message: `Rain ${weather.precipitation.toFixed(1)} mm`,
-            value: weather.precipitation,
-            threshold: thresholds.precipitation,
-        });
-    }
-
-    return alerts;
-}
 
 /**
  * Format wind for display
@@ -974,214 +871,6 @@ export async function fetchFullForecast(
     }
 }
 
-/**
- * Extract weather data at a specific timestamp from cached full forecast
- * @param forecast - Full forecast data from fetchFullForecast
- * @param targetTimestamp - Target timestamp in ms
- * @param altitude - Target altitude in feet for wind interpolation
- * @param waypointName - Optional waypoint name for logging
- * @param enableLogging - Enable debug logging
- * @returns WaypointWeather at the target timestamp, or null on error
- */
-export function extractWeatherAtTimestamp(
-    forecast: FullForecastData,
-    targetTimestamp: number,
-    altitude: number,
-    waypointName?: string,
-    enableLogging: boolean = false
-): WaypointWeather | null {
-    try {
-        const { pointForecastData, meteogramData, timestamps, meteogramTimestamps } = forecast;
-
-        if (!timestamps || timestamps.length === 0) {
-            return null;
-        }
-
-        // Get interpolation indices for the target timestamp
-        const interp = getInterpolationIndices(timestamps, targetTimestamp);
-        const { lowerIndex, upperIndex, fraction, needsInterpolation } = interp;
-
-        // Extract surface wind data
-        const windData = pointForecastData.wind || pointForecastData['wind-surface'];
-        const windDirData = pointForecastData.windDir || pointForecastData['windDir-surface'];
-        const gustData = pointForecastData.gust || pointForecastData['gust-surface'];
-        const tempData = pointForecastData.temp || pointForecastData['temp-surface'];
-        const dewPointData = pointForecastData.dewpoint || pointForecastData['dewpoint-surface'];
-        const humidityData = pointForecastData.rh || pointForecastData['rh-surface'];
-        const cbaseData = meteogramData?.cbase || pointForecastData.cbase || pointForecastData['cbase-surface'];
-
-        // Extract wind at altitude from meteogram if available
-        let finalWindSpeed: number = 0;
-        let finalWindDir: number = 0;
-        let usedPressureLevel = 'surface';
-        let verticalWinds: LevelWind[] = [];
-
-        if (meteogramData && altitude > 500) {
-            // Get time index for meteogram (may have different timestamps)
-            let meteogramTimeIndex = 0;
-            if (meteogramTimestamps && meteogramTimestamps.length > 0) {
-                const meteogramInterp = getInterpolationIndices(meteogramTimestamps, targetTimestamp);
-                meteogramTimeIndex = meteogramInterp.lowerIndex;
-            }
-
-            // Get wind at altitude from meteogram
-            const altitudeWind = getWindAtAltitudeFromMeteogram(meteogramData, altitude, meteogramTimeIndex, false);
-            if (altitudeWind) {
-                finalWindSpeed = altitudeWind.windSpeed;
-                finalWindDir = altitudeWind.windDir;
-                usedPressureLevel = altitudeWind.level;
-            }
-
-            // Get all vertical winds for the time index
-            verticalWinds = getAllWindLevelsFromMeteogram(meteogramData, meteogramTimeIndex, false);
-        }
-
-        // Fallback to surface wind if altitude wind not available
-        if (finalWindSpeed === 0 && windData) {
-            const windLower = windData[lowerIndex] || 0;
-            const windUpper = windData[upperIndex] || 0;
-            const windMs = needsInterpolation
-                ? interpolateValue(windLower, windUpper, fraction) ?? 0
-                : windLower;
-            finalWindSpeed = msToKnots(windMs);
-
-            if (windDirData) {
-                const dirLower = windDirData[lowerIndex] || 0;
-                const dirUpper = windDirData[upperIndex] || 0;
-                finalWindDir = needsInterpolation
-                    ? interpolateWindDirection(dirLower, dirUpper, fraction)
-                    : dirLower;
-            }
-        }
-
-        // Extract surface wind for terminal operations
-        let surfaceWindSpeed: number | undefined;
-        let surfaceWindDir: number | undefined;
-        if (windData && windDirData) {
-            const surfaceWindMs = needsInterpolation
-                ? interpolateValue(windData[lowerIndex], windData[upperIndex], fraction) ?? 0
-                : windData[lowerIndex] || 0;
-            surfaceWindSpeed = msToKnots(surfaceWindMs);
-            surfaceWindDir = needsInterpolation
-                ? interpolateWindDirection(windDirData[lowerIndex] || 0, windDirData[upperIndex] || 0, fraction)
-                : windDirData[lowerIndex] || 0;
-        }
-
-        // Extract temperature
-        let tempCelsius = 15; // ISA default
-        if (tempData) {
-            const tempLower = tempData[lowerIndex] || 288.15;
-            const tempUpper = tempData[upperIndex] || 288.15;
-            const tempKelvin = needsInterpolation
-                ? interpolateValue(tempLower, tempUpper, fraction) ?? 288.15
-                : tempLower;
-            tempCelsius = kelvinToCelsius(tempKelvin);
-        }
-
-        // Extract dew point
-        let dewPointCelsius: number | undefined;
-        if (dewPointData) {
-            const dewLower = dewPointData[lowerIndex];
-            const dewUpper = dewPointData[upperIndex];
-            const dewKelvin = needsInterpolation
-                ? interpolateValue(dewLower, dewUpper, fraction)
-                : dewLower;
-            if (dewKelvin !== null && dewKelvin !== undefined && !isNaN(dewKelvin)) {
-                dewPointCelsius = kelvinToCelsius(dewKelvin);
-            }
-        }
-
-        // Extract gust
-        let gustKnots: number | undefined;
-        if (gustData) {
-            const gustMs = needsInterpolation
-                ? interpolateValue(gustData[lowerIndex], gustData[upperIndex], fraction)
-                : gustData[lowerIndex];
-            if (gustMs !== null && gustMs !== undefined && !isNaN(gustMs)) {
-                gustKnots = msToKnots(gustMs);
-            }
-        }
-
-        // Extract cloud base
-        let cloudBase: number | undefined;
-        let cloudBaseDisplay: string | undefined;
-
-        if (cbaseData && Array.isArray(cbaseData) && cbaseData.length > 0) {
-            // Use meteogram timestamps for cbase interpolation if from meteogram
-            let cbaseInterp = interp;
-            if (meteogramData?.cbase && meteogramTimestamps && meteogramTimestamps.length > 0) {
-                cbaseInterp = getInterpolationIndices(meteogramTimestamps, targetTimestamp);
-            }
-
-            const cbaseLower = cbaseData[cbaseInterp.lowerIndex];
-            const cbaseUpper = cbaseData[cbaseInterp.upperIndex];
-            const isLowerValid = cbaseLower !== null && cbaseLower !== undefined && !isNaN(cbaseLower) && cbaseLower > 0;
-            const isUpperValid = cbaseUpper !== null && cbaseUpper !== undefined && !isNaN(cbaseUpper) && cbaseUpper > 0;
-
-            let cbaseValue: number | null = null;
-            if (cbaseInterp.needsInterpolation && isLowerValid && isUpperValid) {
-                cbaseValue = interpolateValue(cbaseLower, cbaseUpper, cbaseInterp.fraction);
-            } else if (isLowerValid) {
-                cbaseValue = cbaseLower;
-            } else if (isUpperValid) {
-                cbaseValue = cbaseUpper;
-            } else {
-                cbaseValue = CLEAR_SKY_METERS;
-            }
-
-            if (cbaseValue !== null && cbaseValue > 0) {
-                cloudBase = cbaseValue;
-                const cloudBaseFeet = metersToFeet(cloudBase);
-                cloudBaseDisplay = cloudBaseFeet >= 29000 ? 'CLR' : `${Math.round(cloudBaseFeet)} ft`;
-            }
-        } else {
-            cloudBase = CLEAR_SKY_METERS;
-            cloudBaseDisplay = 'CLR';
-        }
-
-        // Extract visibility from humidity
-        let visibility: number | undefined;
-        let humidity: number | undefined;
-        if (humidityData) {
-            const rhLower = humidityData[lowerIndex];
-            const rhUpper = humidityData[upperIndex];
-            humidity = needsInterpolation
-                ? interpolateValue(rhLower, rhUpper, fraction) ?? undefined
-                : rhLower ?? undefined;
-            if (humidity !== undefined) {
-                // Estimate visibility from humidity
-                if (humidity >= 100) visibility = 0.5;
-                else if (humidity >= 95) visibility = 2;
-                else if (humidity >= 90) visibility = 5;
-                else if (humidity >= 80) visibility = 10;
-                else visibility = 20;
-            }
-        }
-
-        return {
-            windSpeed: finalWindSpeed,
-            windDir: finalWindDir,
-            windGust: gustKnots,
-            windAltitude: altitude,
-            windLevel: usedPressureLevel,
-            surfaceWindSpeed,
-            surfaceWindDir,
-            verticalWinds,
-            temperature: tempCelsius,
-            dewPoint: dewPointCelsius,
-            cloudBase,
-            cloudBaseDisplay,
-            visibility,
-            humidity,
-            timestamp: targetTimestamp,
-        };
-    } catch (error) {
-        if (enableLogging) {
-            logger.error(`[Weather] Error extracting weather at ${targetTimestamp} for ${waypointName}:`, error);
-        }
-        return null;
-    }
-}
 
 /**
  * Get the full cbase table for a location

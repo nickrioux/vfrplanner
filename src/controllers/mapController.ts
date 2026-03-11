@@ -210,7 +210,7 @@ export function updateMapLayers(): void {
                     });
 
                     if (wxSample) {
-                        const popup = buildSamplePopup(wxSample.weather, sample);
+                        const popup = buildSamplePopup(wxSample.weather, sample, wxSample.etaTime);
                         dot.bindPopup(popup, { className: 'wx-sample-popup' });
                     }
 
@@ -506,11 +506,17 @@ function buildWaypointTooltip(
 function buildSamplePopup(
     wx: WaypointWeather,
     sample: RouteWeatherCondition,
+    etaTime?: number,
 ): string {
     const conditionColor = getSegmentColor(sample.condition);
     let html = '<div style="font-size: 12px; line-height: 1.5;">';
 
     html += `<b>Route Sample @ ${sample.distance.toFixed(1)} NM</b>`;
+    if (etaTime) {
+        const etaDate = new Date(etaTime);
+        const timeStr = etaDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        html += `<br/><span style="font-size: 11px; color: #aaa;">Forecast for ETA: ${timeStr}</span>`;
+    }
     html += `<br/><span style="color: ${conditionColor}; font-weight: bold;">Conditions: ${sample.condition.toUpperCase()}</span>`;
 
     html += '<br/><div style="margin-top: 4px;">';

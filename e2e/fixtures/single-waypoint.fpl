@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<flight-plan xmlns="http://www8.garmin.com/xmlschemas/FlightPlan/v1">
+  <waypoint-table>
+    <waypoint>
+      <identifier>CYQB</identifier>
+      <type>AIRPORT</type>
+      <country-code>CY</country-code>
+      <lat>46.7911</lat>
+      <lon>-71.3933</lon>
+    </waypoint>
+  </waypoint-table>
+  <route>
+    <route-name>Single WP</route-name>
+    <flight-plan-index>1</flight-plan-index>
+    <route-point>
+      <waypoint-identifier>CYQB</waypoint-identifier>
+      <waypoint-type>AIRPORT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+  </route>
+</flight-plan>

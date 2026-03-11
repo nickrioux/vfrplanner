@@ -1,80 +1,87 @@
 /**
  * Playwright E2E Test Configuration
  * For VFR Planner Windy Plugin
+ *
+ * Dev workflow: windy.com/dev → enter https://localhost:9995 → plugin loads.
+ * Requires a logged-in Windy session (saved in e2e/.auth/windy-session.json).
+ *
+ * First-time setup (headed, manual login):
+ *   npx playwright test e2e/auth.setup.ts --project=setup --headed
+ *
+ * Uses the system Chrome — no Playwright browser download needed.
  */
 
 import { defineConfig, devices } from '@playwright/test';
 
+const AUTH_FILE = 'e2e/.auth/windy-session.json';
+
 export default defineConfig({
-    // Test directory
     testDir: './e2e',
-
-    // Run tests in parallel
     fullyParallel: true,
-
-    // Fail the build on CI if you accidentally left test.only in the source code
     forbidOnly: !!process.env.CI,
-
-    // Retry on CI only
     retries: process.env.CI ? 2 : 0,
-
-    // Limit workers on CI
     workers: process.env.CI ? 1 : undefined,
 
-    // Reporter configuration
     reporter: [
         ['html', { outputFolder: 'playwright-report' }],
         ['list'],
     ],
 
-    // Shared settings for all projects
     use: {
-        // Base URL for navigation
         baseURL: 'https://www.windy.com',
-
-        // Collect trace when retrying the failed test
         trace: 'on-first-retry',
-
-        // Screenshot on failure
         screenshot: 'only-on-failure',
-
-        // Video on failure
         video: 'on-first-retry',
+        ignoreHTTPSErrors: true,
+        headless: false,
+        channel: 'chrome',
+        launchOptions: {
+            args: [
+                '--ignore-certificate-errors',
+                '--allow-insecure-localhost',
+            ],
+        },
     },
 
-    // Configure projects for major browsers
     projects: [
+        // Auth setup — runs first (headed for manual login if needed)
+        {
+            name: 'setup',
+            testMatch: /auth\.setup\.ts/,
+            use: {
+                headless: false,
+            },
+        },
         {
             name: 'chromium',
-            use: { ...devices['Desktop Chrome'] },
+            use: {
+                ...devices['Desktop Chrome'],
+                storageState: AUTH_FILE,
+            },
+            dependencies: ['setup'],
         },
-        {
-            name: 'firefox',
-            use: { ...devices['Desktop Firefox'] },
-        },
-        {
-            name: 'webkit',
-            use: { ...devices['Desktop Safari'] },
-        },
-        // Mobile viewports
         {
             name: 'mobile-chrome',
-            use: { ...devices['Pixel 5'] },
+            use: {
+                ...devices['Pixel 5'],
+                storageState: AUTH_FILE,
+            },
+            dependencies: ['setup'],
         },
         {
-            name: 'mobile-safari',
-            use: { ...devices['iPhone 12'] },
+            name: 'tablet',
+            use: {
+                ...devices['iPad (gen 7)'],
+                browserName: 'chromium',
+                storageState: AUTH_FILE,
+            },
+            dependencies: ['setup'],
         },
     ],
 
-    // Output directory for test artifacts
     outputDir: 'test-results/',
-
-    // Global timeout for each test
-    timeout: 60000,
-
-    // Timeout for each expect() assertion
+    timeout: 90000,
     expect: {
-        timeout: 10000,
+        timeout: 15000,
     },
 });

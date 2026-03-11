@@ -225,6 +225,13 @@ function createSettingsStore() {
                 llmModel: DEFAULT_MODEL_BY_PROVIDER[provider],
             }));
         },
+
+        /**
+         * Set LLM custom endpoint URL
+         */
+        setLlmCustomEndpoint: (endpoint: string) => {
+            update(state => ({ ...state, llmCustomEndpoint: endpoint }));
+        },
     };
 }
 

@@ -6,6 +6,8 @@
     import { calculateProfileData, interpolateAltitude, type ProfileDataPoint, type SegmentCondition } from '../services/profileService';
     import type { ElevationPoint } from '../services/elevationService';
     import { lerpAngle } from '../utils/interpolation';
+    import { generateSmallWindBarb } from '../utils/windBarb';
+    import { getSegmentColor } from '../utils/displayUtils';
     import { logger } from '../services/logger';
     import { getActiveThresholds } from '../services/vfrConditionRules';
 
@@ -119,207 +121,6 @@
     $: scaleKey = `${maxAltitude}-${graphHeight}`;
 
     /**
-     * Get segment color based on condition
-     */
-    function getSegmentColor(condition?: SegmentCondition): string {
-        switch (condition) {
-            case 'good':
-                return '#4caf50'; // Green
-            case 'marginal':
-                return '#ff9800'; // Orange/Yellow
-            case 'poor':
-                return '#f44336'; // Red
-            case 'unknown':
-            default:
-                return '#757575'; // Gray
-        }
-    }
-
-    /**
-     * Generate aviation wind barb symbol
-     * @param x - Center X position
-     * @param y - Center Y position (top of flight path marker)
-     * @param windDir - Wind direction in degrees (where wind comes FROM)
-     * @param windSpeed - Wind speed in knots
-     * @returns SVG group element content
-     */
-    function generateWindBarb(x: number, y: number, windDir: number, windSpeed: number): {
-        staff: string;
-        barbs: Array<{ path: string; type: string }>;
-    } {
-        const staffLength = 30;
-        const barbLength = 10;
-        const shortBarbLength = 5;
-        const triangleSize = 8;
-
-        // Convert wind direction to radians (wind comes FROM this direction)
-        const angle = (windDir - 90) * Math.PI / 180; // -90 to adjust for SVG coordinate system
-
-        // Calculate staff end point
-        const staffEndX = x + Math.cos(angle) * staffLength;
-        const staffEndY = y + Math.sin(angle) * staffLength;
-
-        // Staff line
-        const staff = `M ${x},${y} L ${staffEndX},${staffEndY}`;
-
-        // Calculate barbs (perpendicular to staff, on the right side)
-        const barbs: Array<{ path: string; type: string }> = [];
-        let remainingSpeed = Math.round(windSpeed);
-        let barbPosition = 0;
-        const barbSpacing = 6;
-
-        // Add 50-knot pennants (triangles)
-        while (remainingSpeed >= 50) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            // Triangle vertices
-            const perpAngle = angle + Math.PI / 2; // Perpendicular to staff
-            const tip1X = posX + Math.cos(perpAngle) * triangleSize;
-            const tip1Y = posY + Math.sin(perpAngle) * triangleSize;
-            const tip2X = posX + Math.cos(angle) * triangleSize;
-            const tip2Y = posY + Math.sin(angle) * triangleSize;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${tip1X},${tip1Y} L ${tip2X},${tip2Y} Z`,
-                type: 'triangle'
-            });
-
-            remainingSpeed -= 50;
-            barbPosition += barbSpacing * 1.5; // Extra space for triangles
-        }
-
-        // Add 10-knot barbs (long lines)
-        while (remainingSpeed >= 10) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            const perpAngle = angle + Math.PI / 2;
-            const barbEndX = posX + Math.cos(perpAngle) * barbLength;
-            const barbEndY = posY + Math.sin(perpAngle) * barbLength;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
-                type: 'long'
-            });
-
-            remainingSpeed -= 10;
-            barbPosition += barbSpacing;
-        }
-
-        // Add 5-knot barbs (short lines)
-        if (remainingSpeed >= 5) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            const perpAngle = angle + Math.PI / 2;
-            const barbEndX = posX + Math.cos(perpAngle) * shortBarbLength;
-            const barbEndY = posY + Math.sin(perpAngle) * shortBarbLength;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
-                type: 'short'
-            });
-        }
-
-        // If wind speed is less than 5 knots, just show circle at center
-        if (windSpeed < 3) {
-            return { staff: '', barbs: [] };
-        }
-
-        return { staff, barbs };
-    }
-
-    /**
-     * Generate a smaller wind barb for vertical wind display
-     * Similar to generateWindBarb but scaled down
-     */
-    function generateSmallWindBarb(x: number, y: number, windDir: number, windSpeed: number, scale: number = 0.6): {
-        staff: string;
-        barbs: Array<{ path: string; type: string }>;
-    } {
-        const staffLength = 20 * scale;
-        const barbLength = 8 * scale;
-        const shortBarbLength = 4 * scale;
-        const triangleSize = 6 * scale;
-
-        // Convert wind direction to radians (wind comes FROM this direction)
-        const angle = (windDir - 90) * Math.PI / 180;
-
-        // Calculate staff end point
-        const staffEndX = x + Math.cos(angle) * staffLength;
-        const staffEndY = y + Math.sin(angle) * staffLength;
-
-        // Staff line
-        const staff = `M ${x},${y} L ${staffEndX},${staffEndY}`;
-
-        // Calculate barbs
-        const barbs: Array<{ path: string; type: string }> = [];
-        let remainingSpeed = Math.round(windSpeed);
-        let barbPosition = 0;
-        const barbSpacing = 4 * scale;
-
-        // Add 50-knot pennants (triangles)
-        while (remainingSpeed >= 50) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            const perpAngle = angle + Math.PI / 2;
-            const tip1X = posX + Math.cos(perpAngle) * triangleSize;
-            const tip1Y = posY + Math.sin(perpAngle) * triangleSize;
-            const tip2X = posX + Math.cos(angle) * triangleSize;
-            const tip2Y = posY + Math.sin(angle) * triangleSize;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${tip1X},${tip1Y} L ${tip2X},${tip2Y} Z`,
-                type: 'triangle'
-            });
-
-            remainingSpeed -= 50;
-            barbPosition += barbSpacing * 1.5;
-        }
-
-        // Add 10-knot barbs (long lines)
-        while (remainingSpeed >= 10) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            const perpAngle = angle + Math.PI / 2;
-            const barbEndX = posX + Math.cos(perpAngle) * barbLength;
-            const barbEndY = posY + Math.sin(perpAngle) * barbLength;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
-                type: 'long'
-            });
-
-            remainingSpeed -= 10;
-            barbPosition += barbSpacing;
-        }
-
-        // Add 5-knot barbs (short lines)
-        if (remainingSpeed >= 5) {
-            const posX = x + Math.cos(angle) * (staffLength - barbPosition);
-            const posY = y + Math.sin(angle) * (staffLength - barbPosition);
-
-            const perpAngle = angle + Math.PI / 2;
-            const barbEndX = posX + Math.cos(perpAngle) * shortBarbLength;
-            const barbEndY = posY + Math.sin(perpAngle) * shortBarbLength;
-
-            barbs.push({
-                path: `M ${posX},${posY} L ${barbEndX},${barbEndY}`,
-                type: 'short'
-            });
-        }
-
-        if (windSpeed < 3) {
-            return { staff: '', barbs: [] };
-        }
-
-        return { staff, barbs };
-    }
-
-    /**
      * Get color for wind level based on whether it's the flight altitude level
      */
     function getWindLevelColor(levelAltitude: number, flightAltitude: number): string {
@@ -410,24 +211,29 @@
         return graphPadding.top + (1 - altitude / maxAltitude) * yRange;
     }
 
-    // Handle mouse move on graph
+    // Handle mouse move on graph (throttled to animation frames)
+    let rafId: number | null = null;
     function handleMouseMove(event: MouseEvent) {
-        if (!svgElement) return;
-        const rect = svgElement.getBoundingClientRect();
-        const x = event.clientX - rect.left;
-        
-        // Convert X coordinate to distance
-        const maxDistance = profileData.length > 0 ? Math.max(...profileData.map(p => p.distance)) : 0;
-        const xRange = graphWidth - graphPadding.left - graphPadding.right;
-        const distance = ((x - graphPadding.left) / xRange) * maxDistance;
-        
-        if (distance >= 0 && distance <= maxDistance) {
-            cursorDistance = distance;
-            cursorData = interpolateAtDistance(distance);
-        } else {
-            cursorDistance = null;
-            cursorData = null;
-        }
+        if (rafId !== null) return;
+        rafId = requestAnimationFrame(() => {
+            rafId = null;
+            if (!svgElement) return;
+            const rect = svgElement.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+
+            // Convert X coordinate to distance
+            const maxDistance = profileData.length > 0 ? Math.max(...profileData.map(p => p.distance)) : 0;
+            const xRange = graphWidth - graphPadding.left - graphPadding.right;
+            const distance = ((x - graphPadding.left) / xRange) * maxDistance;
+
+            if (distance >= 0 && distance <= maxDistance) {
+                cursorDistance = distance;
+                cursorData = interpolateAtDistance(distance);
+            } else {
+                cursorDistance = null;
+                cursorData = null;
+            }
+        });
     }
 
     function handleMouseLeave() {
@@ -527,19 +333,19 @@
     <!-- Condition Legend -->
     <div class="condition-legend">
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #4caf50;"></span>
+            <span class="legend-color" style="background-color: var(--color-condition-good);"></span>
             <span class="legend-label">Good VFR</span>
         </div>
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #ff9800;"></span>
+            <span class="legend-color" style="background-color: var(--color-condition-marginal);"></span>
             <span class="legend-label">Marginal VFR</span>
         </div>
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #f44336;"></span>
+            <span class="legend-color" style="background-color: var(--color-condition-poor);"></span>
             <span class="legend-label">Poor VFR</span>
         </div>
         <div class="legend-item">
-            <span class="legend-color" style="background-color: #757575;"></span>
+            <span class="legend-color" style="background-color: var(--color-condition-unknown);"></span>
             <span class="legend-label">No Data</span>
         </div>
     </div>
@@ -615,6 +421,8 @@
         <svg
             bind:this={svgElement}
             class="profile-graph"
+            role="img"
+            aria-label="Altitude profile showing terrain, flight path, clouds, and wind data along the route"
             width={graphWidth}
             height={graphHeight}
             viewBox={`0 0 ${graphWidth} ${graphHeight}`}
@@ -850,7 +658,7 @@
                         cy={altitudeToY(cursorData.altitude)}
                         r="6"
                         fill="white"
-                        stroke="#3498db"
+                        stroke="var(--color-primary)"
                         stroke-width="2"
                     />
                 {/if}

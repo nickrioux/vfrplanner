@@ -4,7 +4,7 @@
  * Replaces dense if-else chains with declarative rules
  */
 
-import type { SegmentCondition } from './profileService';
+import type { SegmentCondition } from '../types/weather';
 import type { VfrConditionThresholds } from '../types/conditionThresholds';
 import type { PluginSettings } from '../types/settings';
 import { getThresholdsForAircraft } from '../types/conditionThresholds';

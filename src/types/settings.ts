@@ -77,6 +77,7 @@ export interface PluginSettings {
     llmApiKey: string;
     llmModel: string;  // model ID or 'openrouter/auto' for auto-routing
     llmProvider: LLMProvider;
+    llmCustomEndpoint: string;  // Custom endpoint URL for local LLMs
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -106,4 +107,5 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     llmApiKey: '',
     llmModel: 'openrouter/auto',
     llmProvider: 'openrouter',
+    llmCustomEndpoint: 'http://localhost:11434/v1/chat/completions',
 };

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<flight-plan xmlns="http://www8.garmin.com/xmlschemas/FlightPlan/v1">
+  <created>2024-01-15T10:00:00Z</created>
+  <waypoint-table>
+    <waypoint>
+      <identifier>CYVB</identifier>
+      <type>AIRPORT</type>
+      <country-code>CY</country-code>
+      <lat>48.0711</lat>
+      <lon>-65.4603</lon>
+      <comment>Bonaventure</comment>
+    </waypoint>
+    <waypoint>
+      <identifier>CYCL</identifier>
+      <type>AIRPORT</type>
+      <country-code>CY</country-code>
+      <lat>47.9908</lat>
+      <lon>-66.3303</lon>
+      <comment>Charlo</comment>
+    </waypoint>
+    <waypoint>
+      <identifier>WP5</identifier>
+      <type>USER WAYPOINT</type>
+      <country-code>CY</country-code>
+      <lat>48.0000</lat>
+      <lon>-67.0000</lon>
+      <comment>Enroute waypoint</comment>
+    </waypoint>
+    <waypoint>
+      <identifier>CYRI</identifier>
+      <type>AIRPORT</type>
+      <country-code>CY</country-code>
+      <lat>47.7644</lat>
+      <lon>-69.5847</lon>
+      <comment>Riviere-du-Loup</comment>
+    </waypoint>
+    <waypoint>
+      <identifier>CYQB</identifier>
+      <type>AIRPORT</type>
+      <country-code>CY</country-code>
+      <lat>46.7911</lat>
+      <lon>-71.3933</lon>
+      <comment>Quebec City Jean Lesage</comment>
+    </waypoint>
+  </waypoint-table>
+  <route>
+    <route-name>CYVB to CYQB</route-name>
+    <route-description>VFR route from Bonaventure to Quebec City</route-description>
+    <flight-plan-index>1</flight-plan-index>
+    <route-point>
+      <waypoint-identifier>CYVB</waypoint-identifier>
+      <waypoint-type>AIRPORT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+    <route-point>
+      <waypoint-identifier>CYCL</waypoint-identifier>
+      <waypoint-type>AIRPORT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+    <route-point>
+      <waypoint-identifier>WP5</waypoint-identifier>
+      <waypoint-type>USER WAYPOINT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+    <route-point>
+      <waypoint-identifier>CYRI</waypoint-identifier>
+      <waypoint-type>AIRPORT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+    <route-point>
+      <waypoint-identifier>CYQB</waypoint-identifier>
+      <waypoint-type>AIRPORT</waypoint-type>
+      <waypoint-country-code>CY</waypoint-country-code>
+    </route-point>
+  </route>
+</flight-plan>

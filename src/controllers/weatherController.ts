@@ -97,6 +97,9 @@ export async function fetchWeatherForRoute(): Promise<void> {
     weatherStore.setError(null);
     weatherStore.setModelWarning(null);
 
+    // Switch to cloud base layer so the map matches the weather data
+    store.set('overlay', 'cbase');
+
     // Check if ECMWF model is selected - inform user about data sources
     if (!isEcmwfModel()) {
         const modelName = getCurrentModelName();
@@ -224,6 +227,7 @@ export async function fetchWeatherForRoute(): Promise<void> {
                     plannedAltitude,
                     pluginName,
                     settings.enableLogging,
+                    adjustForFlightTime,
                 );
 
                 // Discard if a newer fetch started during sampling
@@ -546,26 +550,25 @@ export async function searchVFRWindows(): Promise<void> {
  * Use a found VFR window by setting the departure time to its start
  */
 export async function useVFRWindow(window: VFRWindow): Promise<void> {
-    const { onSaveSession } = ensureInitialized();
+    const { onMapUpdate, onSaveSession } = ensureInitialized();
 
     departureTimeStore.setTime(window.startTime);
 
     // Update Windy's timeline to show weather at this time on the map
-    // Set flag to avoid triggering feedback loop
+    // Keep flag set until fetch completes to avoid feedback loop
     departureTimeStore.setUpdatingToWindy(true);
     try {
         store.set('timestamp', window.startTime);
-    } finally {
-        setTimeout(() => {
-            departureTimeStore.setUpdatingToWindy(false);
-        }, 100);
-    }
 
-    // Refresh weather data for the route panel with the new departure time
-    const routeState = routeStore.getState();
-    if (routeState.flightPlan) {
-        await fetchWeatherForRoute();
-        onSaveSession?.();
+        // Refresh weather data for the route panel with the new departure time
+        const routeState = routeStore.getState();
+        if (routeState.flightPlan) {
+            await fetchWeatherForRoute();
+            onMapUpdate?.();
+            onSaveSession?.();
+        }
+    } finally {
+        departureTimeStore.setUpdatingToWindy(false);
     }
 }
 

@@ -50,6 +50,10 @@ export class ForecastCache {
             return null;
         }
 
+        // Move to end of Map for LRU tracking (most recently used)
+        this.cache.delete(key);
+        this.cache.set(key, entry);
+
         return entry.data;
     }
 
@@ -100,15 +104,16 @@ export class ForecastCache {
     }
 
     /**
-     * Evict the oldest entries from cache
+     * Evict the least recently used entries from cache.
+     * Map iteration order is insertion order; LRU entries are at the front.
      * @param count - Number of entries to evict
      */
     private evictOldest(count: number): void {
-        const entries = Array.from(this.cache.entries())
-            .sort((a, b) => a[1].expiresAt - b[1].expiresAt);
-
-        for (let i = 0; i < Math.min(count, entries.length); i++) {
-            this.cache.delete(entries[i][0]);
+        let evicted = 0;
+        for (const key of this.cache.keys()) {
+            if (evicted >= count) break;
+            this.cache.delete(key);
+            evicted++;
         }
     }
 
